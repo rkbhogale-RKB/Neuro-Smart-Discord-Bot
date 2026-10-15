@@ -60,6 +60,16 @@ CREATE TABLE IF NOT EXISTS tool_usage (
     ts REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_usage ON tool_usage(user_id, tool, ts);
+
+-- Where the bot talked to someone recently (used for cross-channel context).
+CREATE TABLE IF NOT EXISTS interactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    ts REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_inter ON interactions(server_id, user_id, ts);
 """
 
 
@@ -70,6 +80,11 @@ async def init() -> None:
     _db.row_factory = aiosqlite.Row
     await _db.execute("PRAGMA journal_mode=WAL")
     await _db.executescript(SCHEMA)
+    # Retention: don't keep raw chat forever.
+    cutoff = time.time() - config.MESSAGE_RETENTION_DAYS * 86400
+    await _db.execute("DELETE FROM messages WHERE ts < ?", (cutoff,))
+    await _db.execute("DELETE FROM interactions WHERE ts < ?", (cutoff,))
+    await _db.execute("DELETE FROM tool_usage WHERE ts < ?", (cutoff,))
     await _db.commit()
 
 
@@ -148,3 +163,58 @@ async def count_tool_calls(user_id: int, tool: str, since_ts: float) -> int:
         (user_id, tool, since_ts),
     )
     return (await cur.fetchone())["c"]
+
+
+# ---------- facts: counting / deleting ----------
+async def count_current_facts(server_id: int, user_id: int) -> int:
+    cur = await _db.execute(
+        "SELECT COUNT(*) AS c FROM facts WHERE server_id=? AND user_id=? AND superseded_ts IS NULL",
+        (server_id, user_id),
+    )
+    return (await cur.fetchone())["c"]
+
+
+async def delete_facts(server_id: int, user_id: int, key: str | None = None) -> int:
+    """Hard-delete (history included). key=None deletes everything for that user."""
+    if key:
+        cur = await _db.execute(
+            "DELETE FROM facts WHERE server_id=? AND user_id=? AND key=?",
+            (server_id, user_id, key))
+    else:
+        cur = await _db.execute(
+            "DELETE FROM facts WHERE server_id=? AND user_id=?", (server_id, user_id))
+    await _db.commit()
+    return cur.rowcount
+
+
+# ---------- cross-channel recall ----------
+async def record_interaction(server_id: int, channel_id: int, user_id: int) -> None:
+    await _db.execute(
+        "INSERT INTO interactions(server_id, channel_id, user_id, ts) VALUES (?,?,?,?)",
+        (server_id, channel_id, user_id, time.time()))
+    await _db.commit()
+
+
+async def other_channels_recent(server_id: int, user_id: int, current_channel_id: int,
+                                since_ts: float, limit: int) -> list[int]:
+    """Channels (other than the current one) where the bot recently talked to this user."""
+    cur = await _db.execute(
+        "SELECT channel_id, MAX(ts) AS t FROM interactions"
+        " WHERE server_id=? AND user_id=? AND channel_id != ? AND ts > ?"
+        " GROUP BY channel_id ORDER BY t DESC LIMIT ?",
+        (server_id, user_id, current_channel_id, since_ts, limit))
+    return [r["channel_id"] for r in await cur.fetchall()]
+
+
+async def is_no_share(channel_id: int) -> bool:
+    cur = await _db.execute("SELECT no_share FROM channel_config WHERE channel_id=?", (channel_id,))
+    row = await cur.fetchone()
+    return bool(row and row["no_share"])
+
+
+async def set_no_share(channel_id: int, flag: bool) -> None:
+    await _db.execute(
+        "INSERT INTO channel_config(channel_id, no_share) VALUES (?,?)"
+        " ON CONFLICT(channel_id) DO UPDATE SET no_share=excluded.no_share",
+        (channel_id, int(flag)))
+    await _db.commit()
