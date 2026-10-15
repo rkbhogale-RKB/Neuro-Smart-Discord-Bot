@@ -1,97 +1,107 @@
-import os
 import asyncio
-import random
+import collections
+import logging
+import time
+
 import discord
-from dotenv import load_dotenv
-from services.reaction_service import maybe_react
-from services.llm_service import generate_response
-from services.memory_service import (
-    add_message,
-    get_history,
-)
+from discord.ext import commands
 
-load_dotenv()
+import agent
+import config
+import db
+import tools.memory_tools  # noqa: F401  (importing registers the tools)
+from tools.registry import ToolContext
 
-TOKEN = os.getenv("DISCORD_TOKEN")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+log = logging.getLogger("bot")
 
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True   # privileged: enable in Developer Portal
+intents.members = True           # privileged: needed later for name -> user resolution
 
-client = discord.Client(intents=intents)
+
+class MemoryBot(commands.Bot):
+    async def setup_hook(self) -> None:
+        await db.init()
+        # slash commands (/myprofile, /forget, ...) get added + synced here in step 2
 
 
-@client.event
+bot = MemoryBot(command_prefix=commands.when_mentioned, intents=intents)
+
+NO_PINGS = discord.AllowedMentions.none()   # a tricked model can never @everyone / ping people
+_recent: dict[int, collections.deque] = collections.defaultdict(collections.deque)
+
+
+def rate_ok(user_id: int) -> bool:
+    now, q = time.time(), _recent[user_id]
+    while q and now - q[0] > 60:
+        q.popleft()
+    if len(q) >= config.USER_REQUESTS_PER_MIN:
+        return False
+    q.append(now)
+    return True
+
+
+async def is_addressed(message: discord.Message) -> bool:
+    if bot.user in message.mentions:
+        return True
+    ref = message.reference
+    if ref and isinstance(ref.resolved, discord.Message):
+        return ref.resolved.author.id == bot.user.id
+    return False
+
+
+def chunks(text: str, size: int = 1900):
+    for i in range(0, len(text), size):
+        yield text[i:i + size]
+
+
+@bot.event
 async def on_ready():
-    print(f"✅ Logged in as {client.user}")
+    log.info("Logged in as %s (%s)", bot.user, bot.user.id)
 
 
-@client.event
-async def on_message(message):
-
-    # Ignore bot's own messages
-    if message.author == client.user:
+@bot.event
+async def on_message(message: discord.Message):
+    if message.guild is None or message.author.id == bot.user.id:
+        return
+    if message.author.bot:
         return
 
-    content = message.content.lower()
+    # Log every human message (clean_content = mentions turned into names).
+    if message.content:
+        await db.log_message(message.id, message.guild.id, message.channel.id,
+                             message.author.id, message.author.display_name, False,
+                             message.clean_content, message.created_at.timestamp())
 
-    # -------- Trigger Detection --------
-
-    is_trigger = "neuro" in content
-
-    is_reply_to_bot = False
-
-    if message.reference:
-
-        replied_message = None
-
-        if message.reference.resolved:
-            replied_message = message.reference.resolved
-
-        else:
-            try:
-                replied_message = await message.channel.fetch_message(
-                    message.reference.message_id
-                )
-            except Exception:
-                replied_message = None
-
-        if replied_message and replied_message.author == client.user:
-            is_reply_to_bot = True
-
-    if not (is_trigger or is_reply_to_bot):
+    if not await is_addressed(message):
         return
 
-    # -----------------------------------
+    # Strip the bot mention but keep other <@id> mentions: step 4 resolves them to users.
+    text = message.content
+    for tag in (f"<@{bot.user.id}>", f"<@!{bot.user.id}>"):
+        text = text.replace(tag, "")
+    text = text.strip()
+    if not text:
+        return
 
-    # Maybe react with an emoji
-    await maybe_react(message)
+    if not rate_ok(message.author.id):
+        await message.add_reaction("⏳")
+        return
 
-    channel_id = message.channel.id
-
-    # Save user's message with username
-    user_message = f"[{message.author.display_name}]: {message.content}"
-
-    add_message(
-        channel_id,
-        "user",
-        user_message,
-    )
-
+    ctx = ToolContext(bot=bot, message=message)
     async with message.channel.typing():
+        try:
+            reply = await asyncio.wait_for(agent.run_agent(ctx, text), timeout=60)
+        except Exception:
+            log.exception("agent failed")
+            reply = "Kuch gadbad ho gayi yaar, thodi der baad try kar."
 
-        reply = generate_response(
-            get_history(channel_id)
-        )
+    for part in chunks(reply):
+        sent = await message.reply(part, mention_author=False, allowed_mentions=NO_PINGS)
+        await db.log_message(sent.id, message.guild.id, message.channel.id, bot.user.id,
+                             bot.user.display_name, True, part, time.time())
 
-        # Human-like thinking delay
-        await asyncio.sleep(random.uniform(4, 6))
 
-    # Save assistant reply
-    add_message(
-        channel_id,
-        "assistant",
-        reply,
-    )
-
-    await message.channel.send(reply)
-client.run(TOKEN)
+if __name__ == "__main__":
+    bot.run(config.DISCORD_TOKEN)
