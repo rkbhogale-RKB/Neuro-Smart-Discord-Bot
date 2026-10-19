@@ -13,6 +13,9 @@ import agent
 import config
 import db
 import memory
+import automod
+from tools import app_tools, moderation_tools   # noqa: F401  (importing registers the tools)
+from tools import discord_utils as du
 from tools.registry import ToolContext
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -118,6 +121,16 @@ async def on_message(message: discord.Message):
     if message.guild is None or message.author.id == bot.user.id:
         return
     if message.author.bot:
+        # Other apps never trigger a reply (no bot-to-bot loops), but what they say is logged
+        # (embeds included, labelled "[app]") so the model can read and analyze it later.
+        desc = du.describe_message(message)
+        if desc:
+            await db.log_message(message.id, message.guild.id, message.channel.id,
+                                 message.author.id, f"{message.author.display_name} [app]", False,
+                                 desc, message.created_at.timestamp())
+        return
+
+    if await automod.check(message):
         return
 
     # Log every human message (clean_content = mentions turned into names).
@@ -143,13 +156,16 @@ async def on_message(message: discord.Message):
 
     if not rate_ok(message.author.id):
         if reason in EXPLICIT:
-            await message.add_reaction("⏳")
+            try:
+                await message.add_reaction("⏳")
+            except discord.HTTPException:
+                pass
         return
 
     ctx = ToolContext(bot=bot, message=message)
 
     async def _run() -> str:
-        return await asyncio.wait_for(agent.run_agent(ctx, text, reason), timeout=60)
+        return await asyncio.wait_for(agent.run_agent(ctx, text, reason), timeout=config.AGENT_TIMEOUT)
 
     try:
         if reason in EXPLICIT:

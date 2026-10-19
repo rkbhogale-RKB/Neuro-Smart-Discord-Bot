@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import logging
 
+import discord
 from google.genai import errors, types
 
 import config
@@ -12,6 +13,7 @@ import db
 import llm
 import memory
 import personality
+from tools import discord_utils as du
 from tools.registry import ToolContext, registry
 
 log = logging.getLogger("agent")
@@ -48,8 +50,24 @@ async def run_agent(ctx: ToolContext, user_text: str, reason: str = "mention") -
         "<elsewhere note=\"recent chat with this person in OTHER channels they can also see\">\n"
         f"{elsewhere}\n</elsewhere>\n\n" if elsewhere else ""
     )
+    # If the author replied to someone else's message (often another app's embed), include it
+    # so "analyze this" / "what does he mean" work.
+    replied_block = ""
+    ref = msg.reference
+    if ref and ref.message_id:
+        target = ref.resolved if isinstance(ref.resolved, discord.Message) else None
+        if target is None:
+            try:
+                target = await msg.channel.fetch_message(ref.message_id)
+            except discord.HTTPException:
+                target = None
+        if target is not None and target.author.id != ctx.bot.user.id:
+            who = target.author.display_name.replace('"', "'")
+            replied_block = (f"<replied_message from=\"{who}\" is_app=\"{target.author.bot}\">\n"
+                             f"{du.describe_message(target, 1200)}\n</replied_message>\n\n")
     prompt = (
         f"<chat_history>\n{_transcript(history)}\n</chat_history>\n\n"
+        f"{replied_block}"
         f"{elsewhere_block}"
         f"New message from {msg.author.display_name}: {user_text}"
     )
@@ -94,7 +112,7 @@ async def run_agent(ctx: ToolContext, user_text: str, reason: str = "mention") -
             if not (isinstance(result, dict) and "error" in result):
                 tools_ok = True
             lines.append(f"- {c.name}({json.dumps(args, ensure_ascii=False)}) -> "
-                         f"{json.dumps(result, ensure_ascii=False, default=str)[:800]}")
+                         f"{json.dumps(result, ensure_ascii=False, default=str)[:2000]}")
         contents[0].parts.append(types.Part(text=(
             "\n\n<tool_results>\n" + "\n".join(lines) + "\n</tool_results>\n"
             "These tools were already run for you. Now reply to the user in character, using "
