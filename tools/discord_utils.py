@@ -70,13 +70,18 @@ def search_members(guild: discord.Guild, query: str, limit: int = 5) -> list:
     return _match(guild, q.lstrip("@").lower())[1][:limit]
 
 
-def resolve_member(guild: discord.Guild, query: str,
-                   fuzzy: bool = False) -> tuple[discord.Member | None, str | None]:
+SELF_WORDS = {"me", "myself", "self", "mine", "i"}
+
+
+def resolve_member(guild: discord.Guild, query: str, fuzzy: bool = False,
+                   author: discord.Member | None = None) -> tuple[discord.Member | None, str | None]:
     """Find ONE member from a mention, an id, or a name. Returns (member, error).
     fuzzy=True also accepts a single typo-tolerant match (fine for pinging, never for bans)."""
     q = (query or "").strip()
     if not q:
         return None, "no member given"
+    if author is not None and q.lstrip("@").lower() in SELF_WORDS:
+        return author, None                     # "DM me", "ping me", "info on myself"
     m = _MENTION_RE.match(q)
     if m:
         q = m.group(1)

@@ -45,7 +45,7 @@ async def find_members(ctx, query: str):
     daily_cap=60,
 )
 async def mention_member(ctx, member: str, message: str = ""):
-    m, err = du.resolve_member(ctx.message.guild, member, fuzzy=True)
+    m, err = du.resolve_member(ctx.message.guild, member, fuzzy=True, author=ctx.message.author)
     if err:
         return {"error": err}
     text = _clean(message, 300) or f"{ctx.message.author.display_name} is calling you!"
@@ -68,7 +68,7 @@ async def mention_member(ctx, member: str, message: str = ""):
     daily_cap=20,
 )
 async def dm_member(ctx, member: str, text: str):
-    m, err = du.resolve_member(ctx.message.guild, member, fuzzy=True)
+    m, err = du.resolve_member(ctx.message.guild, member, fuzzy=True, author=ctx.message.author)
     if err:
         return {"error": err}
     if m.bot:

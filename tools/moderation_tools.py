@@ -46,7 +46,7 @@ def _reason(ctx, reason: str) -> str:
 
 
 def _member(ctx, query: str):
-    return du.resolve_member(ctx.message.guild, query)
+    return du.resolve_member(ctx.message.guild, query, author=ctx.message.author)
 
 
 @registry.register(
@@ -137,7 +137,7 @@ async def kick_member(ctx, member: str, reason: str = ""):
     if (why := _check_target(ctx, m, "kick_members")):
         return {"error": why}
     if not await du.confirm(ctx.message, f"Kick **{m.display_name}** ({m.id})? Reason: {reason or 'none'}"):
-        return {"status": "cancelled by requester"}
+        return {"status": "not confirmed (cancelled, or no button press in time), nothing was done"}
     try:
         await m.kick(reason=_reason(ctx, reason))
     except discord.HTTPException as e:
@@ -177,7 +177,7 @@ async def ban_member(ctx, member: str, reason: str = "", delete_message_days: in
             return {"error": "can't ban that account"}
         target, label = discord.Object(id=int(q)), f"user id {q} (not in server)"
     if not await du.confirm(ctx.message, f"Ban **{label}**? Reason: {reason or 'none'}"):
-        return {"status": "cancelled by requester"}
+        return {"status": "not confirmed (cancelled, or no button press in time), nothing was done"}
     days = max(0, min(int(delete_message_days), 7))
     try:
         await guild.ban(target, reason=_reason(ctx, reason), delete_message_seconds=days * 86400)
@@ -236,7 +236,7 @@ async def purge_messages(ctx, count: int, member: str = ""):
             return {"error": err}
     if count > 10 and not await du.confirm(
             ctx.message, f"Delete the last {count} messages{f' from {target.display_name}' if target else ''}?"):
-        return {"status": "cancelled by requester"}
+        return {"status": "not confirmed (cancelled, or no button press in time), nothing was done"}
     try:
         deleted = await ch.purge(limit=count, check=(lambda m: m.author.id == target.id) if target else None)
     except discord.HTTPException as e:
