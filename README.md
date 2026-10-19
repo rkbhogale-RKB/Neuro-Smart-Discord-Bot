@@ -24,3 +24,28 @@ Actions are logged to `MOD_LOG_CHANNEL_ID` if set.
 
 Optional auto-moderation (`AUTOMOD=true`): deletes spam / mass-mention / invite messages and times
 the sender out briefly. It never kicks or bans by itself.
+
+## Pinging, DMs and server info
+Anyone can ask: "call hardik", "tell bob to come here" (pings only that person, never @everyone/roles;
+small typos in names are tolerated), "DM hardik ...", "who is in the server", "list members",
+"list channels/roles", "who is in voice", "server info". Member lists need the **Server Members** intent.
+
+## Other bots: predefined prefixes
+Copy `app_profiles.example.json` to `app_profiles.json`, or use `/neuro appprofile app:@Bolt prefix:!`.
+- `prefix`: added automatically ("ask bolt help" sends `!help`)
+- `mention`: true if the bot only answers when @mentioned
+- `slash_only`: true if it has only slash commands. Discord forbids bots from running slash
+  commands or pressing buttons, so Neuro then tells you the exact `/command` to run yourself,
+  and can read and explain the reply afterwards.
+- `wait`: seconds to wait for its reply
+
+## /neuro commands (work without the AI)
+- `/neuro status`: checks permissions, role position, member list, intents, mod-log channel, other bots
+- `/neuro debug`: which tools were used for the last requests, and what they returned
+- `/neuro members [role] [channel_only]`: member list
+- `/neuro appprofile`: save how to talk to another bot
+
+## Robustness
+Action-looking messages use the stronger model for tool choice; the model can chain tools (look up,
+then act); tool errors are explained plainly; bad tool arguments are handled; tools time out instead
+of hanging; one request per person at a time; clean shutdown. Tests: `python tests/test_tools.py`.

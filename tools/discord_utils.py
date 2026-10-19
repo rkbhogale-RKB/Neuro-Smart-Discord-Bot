@@ -1,4 +1,5 @@
 """Helpers shared by the moderation and app tools."""
+import difflib
 import logging
 import re
 
@@ -36,8 +37,43 @@ def describe_message(m: discord.Message, limit: int = 1500) -> str:
     return "\n".join(parts)[:limit]
 
 
-def resolve_member(guild: discord.Guild, query: str) -> tuple[discord.Member | None, str | None]:
-    """Find ONE member from a mention, an id, or a (partial) name. Returns (member, error)."""
+def _names(x: discord.Member) -> set[str]:
+    return {n for n in (x.name.lower(), x.display_name.lower(), (x.global_name or "").lower()) if n}
+
+
+def _match(guild: discord.Guild, ql: str) -> tuple[str, list]:
+    """Candidates for a name: ('exact'|'partial'|'fuzzy'|'none', members)."""
+    members = list(guild.members)
+    exact = [x for x in members if ql in _names(x)]
+    if exact:
+        return "exact", exact
+    partial = [x for x in members if any(ql in n for n in _names(x))]
+    if partial:
+        return "partial", partial
+    index: dict[str, list] = {}
+    for x in members:
+        for n in _names(x):
+            index.setdefault(n, []).append(x)
+    out: list = []
+    for n in difflib.get_close_matches(ql, list(index), n=5, cutoff=0.7):
+        out += [x for x in index[n] if x not in out]
+    return ("fuzzy", out) if out else ("none", [])
+
+
+def search_members(guild: discord.Guild, query: str, limit: int = 5) -> list:
+    """Members whose name looks like the query (typos allowed). For lookups, never for punishments."""
+    q = (query or "").strip()
+    m = _MENTION_RE.match(q)
+    if m or q.isdigit():
+        mem = guild.get_member(int(m.group(1) if m else q))
+        return [mem] if mem else []
+    return _match(guild, q.lstrip("@").lower())[1][:limit]
+
+
+def resolve_member(guild: discord.Guild, query: str,
+                   fuzzy: bool = False) -> tuple[discord.Member | None, str | None]:
+    """Find ONE member from a mention, an id, or a name. Returns (member, error).
+    fuzzy=True also accepts a single typo-tolerant match (fine for pinging, never for bans)."""
     q = (query or "").strip()
     if not q:
         return None, "no member given"
@@ -47,18 +83,15 @@ def resolve_member(guild: discord.Guild, query: str) -> tuple[discord.Member | N
     if q.isdigit():
         mem = guild.get_member(int(q))
         return (mem, None) if mem else (None, "no member with that id in this server")
-    ql = q.lstrip("@").lower()
-
-    def names(x: discord.Member):
-        return (x.name.lower(), x.display_name.lower(), (x.global_name or "").lower())
-
-    exact = [x for x in guild.members if ql in names(x)]
-    pool = exact or [x for x in guild.members if any(ql in n for n in names(x))]
-    if len(pool) == 1:
-        return pool[0], None
-    if not pool:
+    kind, pool = _match(guild, q.lstrip("@").lower())
+    if kind == "none":
         return None, f"no member matching '{q}'"
-    return None, "ambiguous, could be: " + ", ".join(f"{x.display_name} ({x.id})" for x in pool[:5])
+    if len(pool) == 1 and (kind != "fuzzy" or fuzzy):
+        return pool[0], None
+    listing = ", ".join(f"{x.display_name} ({x.id})" for x in pool[:5])
+    if kind == "fuzzy":
+        return None, f"no exact match for '{q}'. Did you mean: {listing}?"
+    return None, "ambiguous, could be: " + listing
 
 
 async def mod_log(guild: discord.Guild, text: str) -> None:

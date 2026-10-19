@@ -18,3 +18,5 @@ logs/
 
 # macOS
 .DS_Store
+# Local bot settings
+app_profiles.json
