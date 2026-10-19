@@ -9,6 +9,7 @@ import logging
 
 import discord
 
+import app_profiles
 import config
 from tools import discord_utils as du
 from tools.registry import registry
@@ -41,7 +42,7 @@ def _find_app(guild: discord.Guild, me_id: int, query: str):
     parameters={"type": "object", "properties": {}},
 )
 async def list_apps(ctx):
-    apps = [{"name": m.display_name, "id": m.id, "status": str(m.status)}
+    apps = [{"name": m.display_name, "id": m.id, "how_to_talk_to_it": app_profiles.describe(app_profiles.get(m))}
             for m in ctx.message.guild.members if m.bot and m.id != ctx.bot.user.id]
     return {"apps": apps[:25]}
 
@@ -101,16 +102,18 @@ async def _collect(bot: discord.Client, channel_id: int, app_id: int, after_id: 
 @registry.register(
     name="run_app_command",
     description=(
-        "Send a message to another app/bot in the current channel and read its answer. Use it for "
-        "prefix commands (e.g. text '!help' or 'b!stats') or, with mention=true, to chat with an "
-        "AI app by @mentioning it. It CANNOT run slash commands or press buttons (Discord forbids "
-        "that for bots). Send the command exactly as the user wrote it; don't invent commands."),
+        "Send a message to another app/bot in the current channel and read its answer. Use it to "
+        "run an app's text commands or to chat with an AI app. The app's known prefix / @mention "
+        "style is applied automatically from its saved profile (see list_apps), so pass just the "
+        "command or question, e.g. 'help' or 'what is a function'. It CANNOT run slash commands "
+        "or press buttons (Discord forbids that for bots): for slash-only apps, tell the user the "
+        "exact /command to run themselves. Don't invent commands the user didn't ask for."),
     parameters={"type": "object",
                 "properties": {"app": {"type": "string", "description": "app name, mention or id"},
                                "text": {"type": "string", "description": "the message to send, max 300 chars"},
                                "mention": {"type": "boolean", "description": "prefix the text with an @mention of the app"}},
                 "required": ["app", "text"]},
-    permission="mod", daily_cap=40,
+    permission=config.APP_TOOL_PERMISSION, daily_cap=60,
 )
 async def run_app_command(ctx, app: str, text: str, mention: bool = False):
     guild, ch = ctx.message.guild, ctx.message.channel
@@ -122,6 +125,18 @@ async def run_app_command(ctx, app: str, text: str, mention: bool = False):
         return {"error": "text must be 1-300 characters"}
     if "@everyone" in text or "@here" in text:
         return {"error": "refusing to send a mass mention"}
+
+    prof = app_profiles.get(target)
+    if prof.get("slash_only") or text.startswith("/"):
+        cmd = "/" + text.lstrip("/")
+        return {"slash_only": True,
+                "note": f"{target.display_name} works through slash commands, which bots can't run. "
+                        f"Ask the user to run `{cmd}` themselves; afterwards I can read its reply."}
+    mention = bool(mention or prof.get("mention"))
+    prefix = str(prof.get("prefix") or "")
+    if prefix and not mention and not text.startswith(prefix):
+        text = prefix + text
+    wait = float(prof.get("wait") or config.APP_WAIT_SECONDS)
     lowered = text.lower()
     if any(w in lowered for w in config.DANGEROUS_APP_WORDS):
         if not await du.confirm(ctx.message, f"Send `{text[:150]}` to **{target.display_name}**? "
@@ -129,7 +144,7 @@ async def run_app_command(ctx, app: str, text: str, mention: bool = False):
             return {"status": "cancelled by requester"}
     content = f"{target.mention} {text}" if mention else text
     after_id = ch.last_message_id or 0
-    collector = asyncio.create_task(_collect(ctx.bot, ch.id, target.id, after_id, config.APP_WAIT_SECONDS))
+    collector = asyncio.create_task(_collect(ctx.bot, ch.id, target.id, after_id, wait))
     try:
         await ch.send(content, allowed_mentions=discord.AllowedMentions(users=[target]) if mention
                       else du.NO_PINGS)
@@ -140,6 +155,7 @@ async def run_app_command(ctx, app: str, text: str, mention: bool = False):
     await du.mod_log(guild, f"🤖 {ctx.message.author} sent `{text[:100]}` to app {target}")
     if not replies:
         return {"sent": content, "replies": [],
-                "note": f"no reply in {config.APP_WAIT_SECONDS}s: wrong prefix, or that app only "
-                        "supports slash commands"}
+                "note": f"no reply in {wait:.0f}s: the prefix may be wrong, the app may need an "
+                        "@mention, or it only supports slash commands. A profile for it can be set "
+                        "with /neuro appprofile."}
     return {"app": target.display_name, "replies": [du.describe_message(m, 800) for m in replies]}

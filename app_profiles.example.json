@@ -1,0 +1,5 @@
+{
+  "prefixbot": {"prefix": "!", "mention": false, "slash_only": false, "wait": 8},
+  "chatbot": {"mention": true, "wait": 12},
+  "slashonlybot": {"slash_only": true}
+}

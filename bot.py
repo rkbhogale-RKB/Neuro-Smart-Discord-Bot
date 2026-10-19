@@ -3,6 +3,7 @@ import collections
 import logging
 import re
 import time
+import types
 from typing import Optional
 
 import discord
@@ -14,7 +15,9 @@ import config
 import db
 import memory
 import automod
-from tools import app_tools, moderation_tools   # noqa: F401  (importing registers the tools)
+import app_profiles
+import diagnostics
+from tools import app_tools, moderation_tools, server_tools, social_tools   # noqa: F401  (importing registers the tools)
 from tools import discord_utils as du
 from tools.registry import ToolContext
 
@@ -23,13 +26,18 @@ log = logging.getLogger("bot")
 
 intents = discord.Intents.default()
 intents.message_content = True   # privileged: enable in Developer Portal
-intents.members = True           # privileged: needed later for name -> user resolution
+intents.members = True           # privileged: name -> user resolution, member lists, moderation
+intents.presences = config.PRESENCE_INTENT   # privileged, optional: online/offline status in lists
 
 
 class MemoryBot(commands.Bot):
     async def setup_hook(self) -> None:
         await db.init()
-        await self.tree.sync()   # registers /whatdoyouknowaboutme, /forget, /noshare
+        await self.tree.sync()   # registers /whatdoyouknowaboutme, /forget, /noshare, /neuro ...
+
+    async def close(self) -> None:
+        await db.close()         # flush the SQLite connection on shutdown
+        await super().close()
 
 
 bot = MemoryBot(command_prefix=commands.when_mentioned, intents=intents)
@@ -37,6 +45,7 @@ bot = MemoryBot(command_prefix=commands.when_mentioned, intents=intents)
 NO_PINGS = discord.AllowedMentions.none()   # a tricked model can never @everyone / ping people
 _recent: dict[int, collections.deque] = collections.defaultdict(collections.deque)
 _tasks: set[asyncio.Task] = set()           # keep references so background tasks aren't GC'd
+_user_locks: dict[int, asyncio.Lock] = collections.defaultdict(asyncio.Lock)
 
 
 def spawn(coro) -> None:
@@ -165,7 +174,10 @@ async def on_message(message: discord.Message):
     ctx = ToolContext(bot=bot, message=message)
 
     async def _run() -> str:
-        return await asyncio.wait_for(agent.run_agent(ctx, text, reason), timeout=config.AGENT_TIMEOUT)
+        # One request at a time per person, so two quick messages can't run the same action twice.
+        async with _user_locks[message.author.id]:
+            return await asyncio.wait_for(agent.run_agent(ctx, text, reason),
+                                          timeout=config.AGENT_TIMEOUT)
 
     try:
         if reason in EXPLICIT:
@@ -185,7 +197,14 @@ async def on_message(message: discord.Message):
         reply = "Hmm? Say that again?"
 
     for part in chunks(reply):
-        sent = await message.reply(part, mention_author=False, allowed_mentions=NO_PINGS)
+        try:
+            sent = await message.reply(part, mention_author=False, allowed_mentions=NO_PINGS)
+        except discord.HTTPException:
+            try:                    # the original message may be deleted: post normally instead
+                sent = await message.channel.send(part, allowed_mentions=NO_PINGS)
+            except discord.HTTPException:
+                log.warning("could not send a reply in channel %s", message.channel.id)
+                return
         await db.log_message(sent.id, message.guild.id, message.channel.id, bot.user.id,
                              bot.user.display_name, True, part, time.time())
     _last_reply[(message.channel.id, message.author.id)] = time.time()
@@ -280,6 +299,75 @@ async def noshare_error(interaction: discord.Interaction, error: app_commands.Ap
                                                 ephemeral=True)
     else:
         log.exception("noshare failed", exc_info=error)
+
+
+# ---------------- /neuro: diagnostics + settings (typed backup that needs no AI) ----------------
+class NeuroGroup(app_commands.Group):
+    async def on_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            msg = "You need the Manage Server permission for that."
+        else:
+            log.exception("/neuro command failed", exc_info=error)
+            msg = "That command failed, check the bot console."
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
+
+
+neuro = NeuroGroup(name="neuro", description="Neuro diagnostics and settings", guild_only=True)
+
+
+@neuro.command(name="status", description="Check my permissions, role position and setup")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def neuro_status(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        diagnostics.status_report(bot, interaction.guild), ephemeral=True, allowed_mentions=NO_PINGS)
+
+
+@neuro.command(name="debug", description="Show which tools I used for the last few requests")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def neuro_debug(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        diagnostics.debug_report(agent.TRACES.get(interaction.guild_id)),
+        ephemeral=True, allowed_mentions=NO_PINGS)
+
+
+@neuro.command(name="members", description="List server members (works without the AI)")
+@app_commands.describe(role="Only people with this role", channel_only="Only people who can see this channel")
+async def neuro_members(interaction: discord.Interaction, role: Optional[str] = None,
+                        channel_only: bool = False):
+    await interaction.response.defer(ephemeral=True)
+    fake = types.SimpleNamespace(message=types.SimpleNamespace(
+        guild=interaction.guild, channel=interaction.channel))
+    res = await server_tools.list_members(fake, "channel" if channel_only else "server", role or "")
+    if "error" in res:
+        text = res["error"] + ("\nRoles: " + ", ".join(res["roles"]) if res.get("roles") else "")
+    else:
+        text = f"**{res['scope']}: {res['total']} people**\n" + "\n".join(f"- {m}" for m in res["members"])
+    await interaction.followup.send(text[:1900], ephemeral=True, allowed_mentions=NO_PINGS)
+
+
+@neuro.command(name="appprofile", description="Tell me how to talk to another bot (its prefix etc.)")
+@app_commands.describe(app="The other bot", prefix="Command prefix it uses, e.g. !",
+                       mention="Does it only answer when @mentioned?",
+                       slash_only="Does it only have slash commands?",
+                       wait="Seconds to wait for its reply (1-30)")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def neuro_appprofile(interaction: discord.Interaction, app: discord.Member,
+                           prefix: Optional[str] = None, mention: Optional[bool] = None,
+                           slash_only: Optional[bool] = None, wait: Optional[int] = None):
+    if not app.bot:
+        await interaction.response.send_message("Pick a bot, not a person.", ephemeral=True)
+        return
+    p = app_profiles.set_profile(app.name, prefix=prefix, mention=mention,
+                                 slash_only=slash_only, wait=wait)
+    await interaction.response.send_message(
+        f"Saved for **{app.display_name}**: {app_profiles.describe(p)}", ephemeral=True,
+        allowed_mentions=NO_PINGS)
+
+
+bot.tree.add_command(neuro)
 
 
 if __name__ == "__main__":

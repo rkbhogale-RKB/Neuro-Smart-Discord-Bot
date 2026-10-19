@@ -1,6 +1,8 @@
 """Tool registry: function + schema + metadata (cost, permission, channels, daily cap).
 The model only SEES tools allowed for this user/channel, and execute() re-checks
 everything, because the model can hallucinate a tool name."""
+import asyncio
+import inspect
 import logging
 import time
 from dataclasses import dataclass
@@ -89,14 +91,22 @@ class Registry:
             used = await db.count_tool_calls(ctx.user_id, name, time.time() - 86400)
             if used >= t.daily_cap:
                 return {"error": f"daily limit reached for {name}"}
+        # Models sometimes add unknown arguments or forget required ones. Drop the unknown ones and
+        # check the rest BEFORE running, so a real TypeError inside a tool isn't mistaken for this.
+        sig = inspect.signature(t.fn)
+        args = {k: v for k, v in (args or {}).items() if k in sig.parameters}
+        try:
+            sig.bind(ctx, **args)
+        except TypeError as e:
+            return {"error": f"bad arguments: {str(e)[:120]}"}
         await db.record_tool_call(ctx.user_id, name, t.cost)
         try:
-            return await t.fn(ctx, **args)
-        except TypeError:
-            return {"error": "bad arguments"}
-        except Exception:
+            return await asyncio.wait_for(t.fn(ctx, **args), timeout=config.TOOL_TIMEOUT)
+        except asyncio.TimeoutError:
+            return {"error": f"{name} timed out"}
+        except Exception as e:
             log.exception("tool %s failed", name)
-            return {"error": "tool failed"}
+            return {"error": f"{name} failed ({type(e).__name__})"}
 
 
 registry = Registry()

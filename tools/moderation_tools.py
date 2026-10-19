@@ -56,7 +56,7 @@ def _member(ctx, query: str):
     parameters={"type": "object",
                 "properties": {"member": {"type": "string", "description": "mention, id or name"}},
                 "required": ["member"]},
-    permission="mod",
+    permission=config.MOD_TOOL_PERMISSION,
 )
 async def get_member_info(ctx, member: str):
     m, err = _member(ctx, member)
@@ -79,7 +79,7 @@ async def get_member_info(ctx, member: str):
                 "properties": {"member": {"type": "string", "description": "mention, id or name"},
                                "count": {"type": "integer", "description": "1-20, default 10"}},
                 "required": ["member"]},
-    permission="mod",
+    permission=config.MOD_TOOL_PERMISSION,
 )
 async def get_member_recent_messages(ctx, member: str, count: int = 10):
     m, err = _member(ctx, member)
@@ -99,7 +99,7 @@ async def get_member_recent_messages(ctx, member: str, count: int = 10):
                                "minutes": {"type": "integer"},
                                "reason": {"type": "string"}},
                 "required": ["member", "minutes"]},
-    permission="mod", daily_cap=50,
+    permission=config.MOD_TOOL_PERMISSION, daily_cap=50,
 )
 async def timeout_member(ctx, member: str, minutes: int, reason: str = ""):
     m, err = _member(ctx, member)
@@ -128,7 +128,7 @@ async def timeout_member(ctx, member: str, minutes: int, reason: str = ""):
                 "properties": {"member": {"type": "string", "description": "mention, id or name"},
                                "reason": {"type": "string"}},
                 "required": ["member"]},
-    permission="mod", daily_cap=20,
+    permission=config.MOD_TOOL_PERMISSION, daily_cap=20,
 )
 async def kick_member(ctx, member: str, reason: str = ""):
     m, err = _member(ctx, member)
@@ -156,7 +156,7 @@ async def kick_member(ctx, member: str, reason: str = ""):
                                "reason": {"type": "string"},
                                "delete_message_days": {"type": "integer"}},
                 "required": ["member"]},
-    permission="mod", daily_cap=20,
+    permission=config.MOD_TOOL_PERMISSION, daily_cap=20,
 )
 async def ban_member(ctx, member: str, reason: str = "", delete_message_days: int = 0):
     guild = ctx.message.guild
@@ -194,7 +194,7 @@ async def ban_member(ctx, member: str, reason: str = "", delete_message_days: in
                 "properties": {"user": {"type": "string", "description": "user id or name"},
                                "reason": {"type": "string"}},
                 "required": ["user"]},
-    permission="mod", daily_cap=30,
+    permission=config.MOD_TOOL_PERMISSION, daily_cap=30,
 )
 async def unban_user(ctx, user: str, reason: str = ""):
     if not _author_can(ctx, "ban_members"):
@@ -220,7 +220,7 @@ async def unban_user(ctx, user: str, reason: str = ""):
                 "properties": {"count": {"type": "integer"},
                                "member": {"type": "string", "description": "optional: only this member"}},
                 "required": ["count"]},
-    permission="mod", daily_cap=20,
+    permission=config.MOD_TOOL_PERMISSION, daily_cap=20,
 )
 async def purge_messages(ctx, count: int, member: str = ""):
     ch = ctx.message.channel

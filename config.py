@@ -28,7 +28,7 @@ OWNER_ID = int(os.getenv("OWNER_ID") or 0)
 DB_PATH = os.getenv("DB_PATH", "data/bot.db")
 
 # Agent loop
-MAX_STEPS = 4                 # hard cap on think -> tool -> think rounds
+MAX_STEPS = 5                 # hard cap on think -> tool -> think rounds
 ESCALATE_CHAT = False         # True = even plain chat gets answered by ANSWER_MODEL (costlier)
 
 # ---- Memory ----
@@ -57,7 +57,18 @@ TRIGGER_NAMES = [n.strip().lower() for n in os.getenv("TRIGGER_NAMES", "neuro,ne
 FOLLOWUP_SECONDS = int(os.getenv("FOLLOWUP_SECONDS", "90"))
 
 # ---- Moderation + talking to other apps ----
-AGENT_TIMEOUT = 90            # seconds; tools may wait for a confirm button or another app's reply
+AGENT_TIMEOUT = 120           # seconds for one whole request (several tool rounds)
+TOOL_TIMEOUT = 60             # seconds for a single tool call
+# Messages that look like actions (ban, ping, list, ask a bot...) go straight to the stronger
+# model for tool picking; plain chat stays on the cheap router model.
+ACTION_MODEL_FOR_TOOLS = _flag("ACTION_MODEL_FOR_TOOLS", True)
+PRESENCE_INTENT = _flag("PRESENCE_INTENT", False)   # privileged; lets member lists show online status
+# Who may use "talk to other apps" and moderation tools: mod | everyone | owner
+APP_TOOL_PERMISSION = os.getenv("APP_TOOL_PERMISSION", "mod").strip().lower()
+MOD_TOOL_PERMISSION = os.getenv("MOD_TOOL_PERMISSION", "mod").strip().lower()
+# Known prefixes / quirks of the other bots (see app_profiles.example.json)
+APP_PROFILES_PATH = os.getenv("APP_PROFILES_PATH") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "app_profiles.json")
 CONFIRM_SECONDS = 25          # how long the requester has to press Confirm on kick / ban / purge
 MOD_LOG_CHANNEL_ID = int(os.getenv("MOD_LOG_CHANNEL_ID") or 0)   # 0 = log to console only
 APP_WAIT_SECONDS = int(os.getenv("APP_WAIT_SECONDS", "8"))       # how long to wait for another app's reply
