@@ -55,3 +55,21 @@ USER_REQUESTS_PER_MIN = 6
 TRIGGER_NAMES = [n.strip().lower() for n in os.getenv("TRIGGER_NAMES", "neuro,neuro smart").split(",") if n.strip()]
 # After the bot answers someone, their next messages in that channel count as follow-ups for this long.
 FOLLOWUP_SECONDS = int(os.getenv("FOLLOWUP_SECONDS", "90"))
+
+# ---- Moderation + talking to other apps ----
+AGENT_TIMEOUT = 90            # seconds; tools may wait for a confirm button or another app's reply
+CONFIRM_SECONDS = 25          # how long the requester has to press Confirm on kick / ban / purge
+MOD_LOG_CHANNEL_ID = int(os.getenv("MOD_LOG_CHANNEL_ID") or 0)   # 0 = log to console only
+APP_WAIT_SECONDS = int(os.getenv("APP_WAIT_SECONDS", "8"))       # how long to wait for another app's reply
+# Commands containing these words need a button confirmation before being sent to another app.
+DANGEROUS_APP_WORDS = [w.strip().lower() for w in os.getenv(
+    "DANGEROUS_APP_WORDS", "ban,kick,nuke,purge,wipe,delete,reset,remove,clear,mute,lockdown"
+).split(",") if w.strip()]
+
+# Auto-moderation (off by default). Deletes + short timeout only, never bans.
+AUTOMOD = _flag("AUTOMOD", False)
+AUTOMOD_SPAM_COUNT = int(os.getenv("AUTOMOD_SPAM_COUNT", "6"))        # this many messages...
+AUTOMOD_SPAM_SECONDS = int(os.getenv("AUTOMOD_SPAM_SECONDS", "8"))    # ...within this many seconds
+AUTOMOD_MENTION_LIMIT = int(os.getenv("AUTOMOD_MENTION_LIMIT", "5"))  # mentions in one message
+AUTOMOD_BLOCK_INVITES = _flag("AUTOMOD_BLOCK_INVITES", False)
+AUTOMOD_TIMEOUT_MINUTES = int(os.getenv("AUTOMOD_TIMEOUT_MINUTES", "10"))

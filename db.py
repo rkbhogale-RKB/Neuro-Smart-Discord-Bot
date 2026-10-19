@@ -115,6 +115,16 @@ async def recent_messages(channel_id: int, n: int, exclude_msg_id: int | None = 
     return list(reversed(rows))
 
 
+async def recent_messages_by_user(server_id: int, user_id: int, n: int):
+    """Latest logged messages from one person in a server (oldest first). Used by mod tools."""
+    cur = await _db.execute(
+        "SELECT author_name, is_bot, content, ts FROM messages"
+        " WHERE server_id=? AND user_id=? ORDER BY ts DESC LIMIT ?",
+        (server_id, user_id, n),
+    )
+    return list(reversed(await cur.fetchall()))
+
+
 # ---------- per-user facts ----------
 async def save_fact(server_id: int, user_id: int, key: str, value: str,
                     channel_id: int | None) -> str:
