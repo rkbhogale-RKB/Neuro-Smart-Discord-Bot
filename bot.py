@@ -17,7 +17,10 @@ import memory
 import automod
 import app_profiles
 import diagnostics
+import event_log
+import reminders
 from tools import app_tools, moderation_tools, server_tools, social_tools   # noqa: F401  (importing registers the tools)
+from tools import reminder_tools, warning_tools   # noqa: F401
 from tools import discord_utils as du
 from tools.registry import ToolContext
 
@@ -31,11 +34,17 @@ intents.presences = config.PRESENCE_INTENT   # privileged, optional: online/offl
 
 
 class MemoryBot(commands.Bot):
+    _reminder_task: Optional[asyncio.Task] = None
+
     async def setup_hook(self) -> None:
         await db.init()
+        event_log.setup(self)    # message / member / role / channel / ban logging
+        self._reminder_task = asyncio.create_task(reminders.run(self))
         await self.tree.sync()   # registers /whatdoyouknowaboutme, /forget, /noshare, /neuro ...
 
     async def close(self) -> None:
+        if self._reminder_task:
+            self._reminder_task.cancel()
         await db.close()         # flush the SQLite connection on shutdown
         await super().close()
 
@@ -322,7 +331,8 @@ neuro = NeuroGroup(name="neuro", description="Neuro diagnostics and settings", g
 @app_commands.checks.has_permissions(manage_guild=True)
 async def neuro_status(interaction: discord.Interaction):
     await interaction.response.send_message(
-        diagnostics.status_report(bot, interaction.guild), ephemeral=True, allowed_mentions=NO_PINGS)
+        diagnostics.status_report(bot, interaction.guild, await db.get_log_channel(interaction.guild_id)),
+        ephemeral=True, allowed_mentions=NO_PINGS)
 
 
 @neuro.command(name="debug", description="Show which tools I used for the last few requests")
@@ -365,6 +375,82 @@ async def neuro_appprofile(interaction: discord.Interaction, app: discord.Member
     await interaction.response.send_message(
         f"Saved for **{app.display_name}**: {app_profiles.describe(p)}", ephemeral=True,
         allowed_mentions=NO_PINGS)
+
+
+def _ctx_from(interaction: discord.Interaction):
+    """A tool context built from a slash command, so typed commands reuse the same tool code."""
+    return types.SimpleNamespace(
+        bot=bot, user_id=interaction.user.id, channel_id=interaction.channel_id,
+        message=types.SimpleNamespace(guild=interaction.guild, author=interaction.user,
+                                      channel=interaction.channel, id=0))
+
+
+@neuro.command(name="setlog", description="Choose the channel for the moderation + event log")
+@app_commands.describe(channel="Where to post logs. Leave empty to turn the setting off.")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def neuro_setlog(interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
+    if channel is None:
+        await db.set_log_channel(interaction.guild_id, None)
+        await interaction.response.send_message(
+            "Log channel setting cleared (the .env value, if any, is used again).", ephemeral=True)
+        return
+    perms = channel.permissions_for(interaction.guild.me)
+    if not (perms.view_channel and perms.send_messages):
+        await interaction.response.send_message(
+            f"I can't post in {channel.mention}. Give me View Channel + Send Messages there first.",
+            ephemeral=True)
+        return
+    await db.set_log_channel(interaction.guild_id, channel.id)
+    await interaction.response.send_message(f"Logs will go to {channel.mention}.", ephemeral=True)
+    await channel.send("📝 Neuro log channel is set. Moderation actions and server events will appear here.",
+                       allowed_mentions=NO_PINGS)
+
+
+@neuro.command(name="warn", description="Give someone a warning (strike)")
+@app_commands.describe(member="Who to warn", reason="Why")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def neuro_warn(interaction: discord.Interaction, member: discord.Member, reason: str):
+    await interaction.response.defer(ephemeral=True)
+    res = await warning_tools.warn_member(_ctx_from(interaction), str(member.id), reason)
+    if "error" in res:
+        text = f"Couldn't warn: {res['error']}"
+    else:
+        text = f"Warned **{res['member']}** (#{res['warning_id']}, now {res['active_warnings']} active)."
+        text += " DM sent." if res.get("dm") == "sent" else " They have DMs closed."
+        if res.get("auto_timeout_minutes"):
+            text += f" Auto-timeout: {res['auto_timeout_minutes']} min."
+        if res.get("auto_timeout_failed"):
+            text += f" Auto-timeout failed: {res['auto_timeout_failed']}."
+    await interaction.followup.send(text, ephemeral=True, allowed_mentions=NO_PINGS)
+
+
+@neuro.command(name="warnings", description="Show a member's active warnings")
+@app_commands.describe(member="Whose warnings")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def neuro_warnings(interaction: discord.Interaction, member: discord.Member):
+    await interaction.response.defer(ephemeral=True)
+    res = await warning_tools.list_warnings(_ctx_from(interaction), str(member.id))
+    if "error" in res:
+        text = res["error"]
+    elif not res["warnings"]:
+        text = f"**{res['member']}** has no active warnings."
+    else:
+        text = f"**{res['member']}**: {res['active_warnings']} active warning(s)\n" + "\n".join(
+            f"#{w['id']} {w['date']} by {w['by']}: {w['reason']}" for w in res["warnings"])
+    await interaction.followup.send(text[:1900], ephemeral=True, allowed_mentions=NO_PINGS)
+
+
+@neuro.command(name="reminders", description="Show your pending reminders")
+async def neuro_reminders(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    from tools import reminder_tools as rt
+    res = await rt.list_reminders(_ctx_from(interaction))
+    if not res.get("reminders"):
+        text = "You have no pending reminders."
+    else:
+        text = "**Your reminders**\n" + "\n".join(
+            f"#{r['id']} {r['when']} ({r['repeat']}) for {r['for']}: {r['text']}" for r in res["reminders"])
+    await interaction.followup.send(text[:1900], ephemeral=True, allowed_mentions=NO_PINGS)
 
 
 bot.tree.add_command(neuro)

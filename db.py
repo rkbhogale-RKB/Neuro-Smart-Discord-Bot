@@ -70,6 +70,38 @@ CREATE TABLE IF NOT EXISTS interactions (
     ts REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_inter ON interactions(server_id, user_id, ts);
+
+-- Moderator warnings (strikes). Never deleted by retention; removed only by a moderator.
+CREATE TABLE IF NOT EXISTS warnings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    moderator_id INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    ts REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_warn ON warnings(server_id, user_id, ts);
+
+-- Reminders. repeat = '' | 'daily' | 'weekly'. One-shot reminders get sent=1 after delivery.
+CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    creator_id INTEGER NOT NULL,
+    target_id INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    due_ts REAL NOT NULL,
+    repeat TEXT NOT NULL DEFAULT '',
+    sent INTEGER NOT NULL DEFAULT 0,
+    created_ts REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rem_due ON reminders(sent, due_ts);
+
+-- Per-server settings changed from Discord (e.g. /neuro setlog).
+CREATE TABLE IF NOT EXISTS guild_settings (
+    server_id INTEGER PRIMARY KEY,
+    log_channel_id INTEGER
+);
 """
 
 
@@ -227,4 +259,127 @@ async def set_no_share(channel_id: int, flag: bool) -> None:
         "INSERT INTO channel_config(channel_id, no_share) VALUES (?,?)"
         " ON CONFLICT(channel_id) DO UPDATE SET no_share=excluded.no_share",
         (channel_id, int(flag)))
+    await _db.commit()
+
+# ---------- warnings ----------
+def _warn_cutoff() -> float:
+    return time.time() - config.WARN_EXPIRE_DAYS * 86400 if config.WARN_EXPIRE_DAYS > 0 else 0.0
+
+
+async def add_warning(server_id: int, user_id: int, moderator_id: int, reason: str) -> int:
+    cur = await _db.execute(
+        "INSERT INTO warnings(server_id, user_id, moderator_id, reason, ts) VALUES (?,?,?,?,?)",
+        (server_id, user_id, moderator_id, reason, time.time()))
+    await _db.commit()
+    return cur.lastrowid
+
+
+async def active_warnings(server_id: int, user_id: int):
+    """Warnings that still count (newest first). Old ones expire after WARN_EXPIRE_DAYS."""
+    cur = await _db.execute(
+        "SELECT id, moderator_id, reason, ts FROM warnings"
+        " WHERE server_id=? AND user_id=? AND ts>? ORDER BY ts DESC",
+        (server_id, user_id, _warn_cutoff()))
+    return await cur.fetchall()
+
+
+async def delete_warning(server_id: int, user_id: int, warning_id: int | None = None) -> int:
+    """Remove one warning by id, or the newest one if warning_id is None. Returns rows removed."""
+    if warning_id is None:
+        cur = await _db.execute(
+            "DELETE FROM warnings WHERE id=(SELECT id FROM warnings WHERE server_id=? AND user_id=?"
+            " ORDER BY ts DESC LIMIT 1)", (server_id, user_id))
+    else:
+        cur = await _db.execute(
+            "DELETE FROM warnings WHERE id=? AND server_id=? AND user_id=?",
+            (warning_id, server_id, user_id))
+    await _db.commit()
+    return cur.rowcount
+
+
+async def clear_warnings(server_id: int, user_id: int) -> int:
+    cur = await _db.execute("DELETE FROM warnings WHERE server_id=? AND user_id=?", (server_id, user_id))
+    await _db.commit()
+    return cur.rowcount
+
+
+# ---------- reminders ----------
+async def add_reminder(server_id, channel_id, creator_id, target_id, text, due_ts, repeat) -> int:
+    cur = await _db.execute(
+        "INSERT INTO reminders(server_id, channel_id, creator_id, target_id, text, due_ts, repeat,"
+        " created_ts) VALUES (?,?,?,?,?,?,?,?)",
+        (server_id, channel_id, creator_id, target_id, text, due_ts, repeat, time.time()))
+    await _db.commit()
+    return cur.lastrowid
+
+
+async def pending_reminders(server_id: int, creator_id: int | None = None, limit: int = 25):
+    if creator_id is None:
+        cur = await _db.execute(
+            "SELECT * FROM reminders WHERE server_id=? AND sent=0 ORDER BY due_ts LIMIT ?",
+            (server_id, limit))
+    else:
+        cur = await _db.execute(
+            "SELECT * FROM reminders WHERE server_id=? AND creator_id=? AND sent=0"
+            " ORDER BY due_ts LIMIT ?", (server_id, creator_id, limit))
+    return await cur.fetchall()
+
+
+async def count_pending_reminders(server_id: int, creator_id: int) -> int:
+    cur = await _db.execute(
+        "SELECT COUNT(*) AS c FROM reminders WHERE server_id=? AND creator_id=? AND sent=0",
+        (server_id, creator_id))
+    return (await cur.fetchone())["c"]
+
+
+async def get_reminder(reminder_id: int):
+    cur = await _db.execute("SELECT * FROM reminders WHERE id=?", (reminder_id,))
+    return await cur.fetchone()
+
+
+async def cancel_reminder(reminder_id: int) -> int:
+    cur = await _db.execute("UPDATE reminders SET sent=1 WHERE id=? AND sent=0", (reminder_id,))
+    await _db.commit()
+    return cur.rowcount
+
+
+async def due_reminders(now: float, limit: int = 20):
+    cur = await _db.execute(
+        "SELECT * FROM reminders WHERE sent=0 AND due_ts<=? ORDER BY due_ts LIMIT ?", (now, limit))
+    return await cur.fetchall()
+
+
+async def claim_reminder(reminder_id: int, old_due: float, next_due: float | None) -> bool:
+    """Take a due reminder so it is delivered exactly once. One-shot: mark sent. Repeating:
+    move it to its next time. Returns False if someone else already took it."""
+    if next_due is None:
+        cur = await _db.execute("UPDATE reminders SET sent=1 WHERE id=? AND sent=0", (reminder_id,))
+    else:
+        cur = await _db.execute(
+            "UPDATE reminders SET due_ts=? WHERE id=? AND sent=0 AND due_ts=?",
+            (next_due, reminder_id, old_due))
+    await _db.commit()
+    return cur.rowcount == 1
+
+
+# ---------- logged messages (used by the event log) ----------
+async def get_logged_message(discord_msg_id: int):
+    cur = await _db.execute(
+        "SELECT user_id, author_name, is_bot, content, channel_id FROM messages WHERE discord_msg_id=?",
+        (discord_msg_id,))
+    return await cur.fetchone()
+
+
+# ---------- per-server settings ----------
+async def get_log_channel(server_id: int) -> int | None:
+    cur = await _db.execute("SELECT log_channel_id FROM guild_settings WHERE server_id=?", (server_id,))
+    row = await cur.fetchone()
+    return row["log_channel_id"] if row and row["log_channel_id"] else None
+
+
+async def set_log_channel(server_id: int, channel_id: int | None) -> None:
+    await _db.execute(
+        "INSERT INTO guild_settings(server_id, log_channel_id) VALUES (?,?)"
+        " ON CONFLICT(server_id) DO UPDATE SET log_channel_id=excluded.log_channel_id",
+        (server_id, channel_id))
     await _db.commit()

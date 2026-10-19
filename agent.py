@@ -25,7 +25,8 @@ log = logging.getLogger("agent")
 ACTION_RE = re.compile(
     r"(<@!?\d+>|\b(ban|unban|kick|timeout|mute|unmute|purge|delete|clear|ping|call|tag|dm|"
     r"message|tell|ask|run|send|use|execute|command|list|show|who|whos|members?|channels?|roles?|"
-    r"voice|online|server|info|find|check|analy[sz]e|explain|bots?|apps?)\b)", re.I)
+    r"voice|online|server|info|find|check|analy[sz]e|explain|bots?|apps?|warn\w*|strikes?|remind\w*|"
+    r"cancel|schedule)\b)", re.I)
 
 # Past-tense claims in a reply -> the tool(s) that must have succeeded for the claim to be true.
 CLAIMS = [
@@ -35,6 +36,9 @@ CLAIMS = [
     (re.compile(r"\b(kicked|booted)\b", re.I), {"kick_member"}),
     (re.compile(r"\b(banned|unbanned)\b", re.I), {"ban_member", "unban_user"}),
     (re.compile(r"\b(timed out|muted|unmuted)\b", re.I), {"timeout_member"}),
+    (re.compile(r"\b(warned)\b", re.I), {"warn_member"}),
+    (re.compile(r"\b(i'?ll remind|i will remind|reminder (?:is |has been )?set|(?:i )?set (?:a |the |your )?reminder|"
+                r"reminding you)\b", re.I), {"set_reminder"}),
     (re.compile(r"\b(purged|deleted (?:the |\d+ )?(?:last )?\d*\s*messages?)\b", re.I), {"purge_messages"}),
 ]
 UNDONE = ("I didn't actually do that, yaar: no action ran on my side. Tell me exactly what to do, "
@@ -107,7 +111,9 @@ async def run_agent(ctx: ToolContext, user_text: str, reason: str = "mention") -
             who = target.author.display_name.replace('"', "'")
             replied_block = (f"<replied_message from=\"{who}\" is_app=\"{target.author.bot}\">\n"
                              f"{du.describe_message(target, 1200)}\n</replied_message>\n\n")
+    now_txt = dt.datetime.now(config.TZ).strftime("%A %Y-%m-%d %H:%M")
     prompt = (
+        f"<now>{now_txt} ({config.TIMEZONE_NAME})</now>\n"
         f"<chat_history>\n{_transcript(history)}\n</chat_history>\n\n"
         f"{replied_block}"
         f"{elsewhere_block}"

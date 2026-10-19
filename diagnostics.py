@@ -5,7 +5,7 @@ import app_profiles
 import config
 
 
-def status_report(bot, guild) -> str:
+def status_report(bot, guild, log_channel_id: int | None = None) -> str:
     me, gp = guild.me, guild.me.guild_permissions
     lines = []
 
@@ -31,12 +31,19 @@ def status_report(bot, guild) -> str:
           "enable the Server Members intent in the Developer Portal and restart")
     check(bot.intents.message_content, "Message Content intent requested", "enable it in code + portal")
 
-    if config.MOD_LOG_CHANNEL_ID:
-        ch = guild.get_channel(config.MOD_LOG_CHANNEL_ID)
-        check(bool(ch and ch.permissions_for(me).send_messages), "Mod-log channel reachable",
-              "MOD_LOG_CHANNEL_ID is wrong or Neuro can't post there")
+    ids = [config.EVENT_LOG_CHANNEL_ID, config.MOD_LOG_CHANNEL_ID]
+    if log_channel_id:
+        ids.insert(0, log_channel_id)
+    ch = next((guild.get_channel(i) for i in ids if i and guild.get_channel(i)), None)
+    if ch is not None:
+        check(bool(ch.permissions_for(me).send_messages), f"Log channel #{ch.name} reachable",
+              "Neuro can't post there; give it View Channel + Send Messages")
     else:
-        lines.append("ℹ️ Mod-log channel not set (MOD_LOG_CHANNEL_ID); actions only go to the console")
+        lines.append("ℹ️ No log channel yet. Use `/neuro setlog` to see moderation actions and server events")
+    check(gp.administrator or gp.view_audit_log, "View Audit Log (shows who kicked/banned in the event log)",
+          "optional: give Neuro this permission")
+    check(config.TZ_OK, f"Timezone {config.TIMEZONE_NAME} loaded",
+          "install the tzdata package (pip install tzdata); reminders use UTC until then")
 
     apps = [m for m in guild.members if m.bot and m.id != bot.user.id]
     if apps:

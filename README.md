@@ -49,3 +49,36 @@ Copy `app_profiles.example.json` to `app_profiles.json`, or use `/neuro appprofi
 Action-looking messages use the stronger model for tool choice; the model can chain tools (look up,
 then act); tool errors are explained plainly; bad tool arguments are handled; tools time out instead
 of hanging; one request per person at a time; clean shutdown. Tests: `python tests/test_tools.py`.
+
+## Warnings (moderators)
+"warn bob for spamming" gives an official strike. Bob gets a DM, and at the configured counts is
+timed out automatically (`WARN_ESCALATION`, default 3 warnings = 1 hour, 5 = 1 day). It never kicks or
+bans by itself. Warnings expire after `WARN_EXPIRE_DAYS` (default 30).
+- "show bob's warnings" (anyone can see their own: "show my warnings")
+- "remove bob's last warning" / "remove warning 12 from bob"
+- "clear bob's warnings" (asks for a Confirm button)
+- Typed backups: `/neuro warn`, `/neuro warnings`
+
+## Reminders (anyone)
+- "remind me in 30 minutes to stretch"
+- "remind me tomorrow at 6pm about the match"
+- "remind hardik at 9pm to join voice" (pings only him)
+- "remind me every day at 9am to check the server" (daily / weekly)
+- "show my reminders", "cancel reminder 4" (moderators can cancel any)
+
+They are saved in the database, survive restarts, and are delivered late with a note if the bot was
+offline. Times use `TIMEZONE` (default Asia/Kolkata). `/neuro reminders` lists yours.
+
+## Event log
+`/neuro setlog channel:#mod-log` picks the channel (or set `EVENT_LOG_CHANNEL_ID` / `MOD_LOG_CHANNEL_ID`).
+It then records, depending on `EVENT_LOG_EVENTS`:
+- **messages:** deleted messages (with who wrote them and what they said), edits (before and after), bulk deletes
+- **members:** joins (new accounts flagged), leaves, nickname changes, timeouts
+- **roles:** role created/deleted, roles gained/lost
+- **channels:** created/deleted
+- **bans:** bans, unbans, kicks
+- **voice:** joins, leaves, moves (off by default)
+
+With the **View Audit Log** permission it also says who did it (kick, ban, timeout, role change).
+Messages in `/noshare` channels are logged without their content. Moderation actions (timeout, kick,
+ban, warn...) go to the same channel.

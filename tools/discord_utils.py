@@ -6,6 +6,7 @@ import re
 import discord
 
 import config
+import db
 
 log = logging.getLogger("discord_utils")
 
@@ -99,18 +100,30 @@ def resolve_member(guild: discord.Guild, query: str, fuzzy: bool = False,
     return None, "ambiguous, could be: " + listing
 
 
+async def log_channel(guild: discord.Guild, events: bool = False):
+    """The channel for logs. Order: /neuro setlog, then env (EVENT_LOG_CHANNEL_ID for events,
+    MOD_LOG_CHANNEL_ID for actions; events fall back to the action channel). None = not set."""
+    ids = [await db.get_log_channel(guild.id)]
+    if events:
+        ids.append(config.EVENT_LOG_CHANNEL_ID)
+    ids.append(config.MOD_LOG_CHANNEL_ID)
+    for cid in ids:
+        if cid:
+            ch = guild.get_channel(cid)
+            if ch is not None:
+                return ch
+    return None
+
+
 async def mod_log(guild: discord.Guild, text: str) -> None:
-    """Post to the mod-log channel if MOD_LOG_CHANNEL_ID is set. Never raises."""
+    """Post a moderation action to the log channel if one is set. Never raises."""
     log.info("modlog: %s", text)
-    if not config.MOD_LOG_CHANNEL_ID:
-        return
-    ch = guild.get_channel(config.MOD_LOG_CHANNEL_ID)
-    if ch is None:
-        return
     try:
-        await ch.send(text[:1900], allowed_mentions=NO_PINGS)
-    except discord.HTTPException:
-        pass
+        ch = await log_channel(guild)
+        if ch is not None:
+            await ch.send(text[:1900], allowed_mentions=NO_PINGS)
+    except Exception:
+        log.debug("mod log post failed", exc_info=True)
 
 
 class ActionConfirm(discord.ui.View):
