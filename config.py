@@ -1,4 +1,6 @@
+import datetime
 import os
+import zoneinfo
 
 from dotenv import load_dotenv
 
@@ -84,3 +86,40 @@ AUTOMOD_SPAM_SECONDS = int(os.getenv("AUTOMOD_SPAM_SECONDS", "8"))    # ...withi
 AUTOMOD_MENTION_LIMIT = int(os.getenv("AUTOMOD_MENTION_LIMIT", "5"))  # mentions in one message
 AUTOMOD_BLOCK_INVITES = _flag("AUTOMOD_BLOCK_INVITES", False)
 AUTOMOD_TIMEOUT_MINUTES = int(os.getenv("AUTOMOD_TIMEOUT_MINUTES", "10"))
+
+# ---- Warnings (strikes) ----
+WARN_EXPIRE_DAYS = int(os.getenv("WARN_EXPIRE_DAYS", "30"))   # warnings older than this stop counting (0 = never)
+
+
+def _escalation(raw: str) -> list[tuple[int, int]]:
+    """'3:60,5:1440' -> [(3, 60), (5, 1440)] = at 3 warnings time out 60 min, at 5 time out 1 day."""
+    out = []
+    for part in raw.split(","):
+        try:
+            n, minutes = part.strip().split(":")
+            if int(n) > 0 and int(minutes) > 0:
+                out.append((int(n), min(int(minutes), 40320)))
+        except ValueError:
+            continue
+    return sorted(out)
+
+
+WARN_ESCALATION = _escalation(os.getenv("WARN_ESCALATION", "3:60,5:1440"))   # empty = never auto-punish
+
+# ---- Reminders ----
+TIMEZONE_NAME = os.getenv("TIMEZONE", "Asia/Kolkata")
+try:
+    TZ = zoneinfo.ZoneInfo(TIMEZONE_NAME)               # how "6pm" is understood
+    TZ_OK = True
+except (zoneinfo.ZoneInfoNotFoundError, ValueError):    # no tz database on this host: pip install tzdata
+    TZ = datetime.timezone.utc
+    TZ_OK = False
+REMINDER_POLL_SECONDS = 15
+MAX_PENDING_REMINDERS = 25    # per person
+
+# ---- Event log (posted to the log channel: /neuro setlog, EVENT_LOG_CHANNEL_ID or MOD_LOG_CHANNEL_ID) ----
+EVENT_LOG_CHANNEL_ID = int(os.getenv("EVENT_LOG_CHANNEL_ID") or 0)
+# categories: messages, members, roles, channels, bans, voice
+EVENT_LOG_EVENTS = {e.strip().lower() for e in os.getenv(
+    "EVENT_LOG_EVENTS", "messages,members,roles,channels,bans").split(",") if e.strip()}
+NEW_ACCOUNT_DAYS = int(os.getenv("NEW_ACCOUNT_DAYS", "7"))    # joins from accounts younger than this are flagged

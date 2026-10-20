@@ -141,7 +141,7 @@ async def run_app_command(ctx, app: str, text: str, mention: bool = False):
     if any(w in lowered for w in config.DANGEROUS_APP_WORDS):
         if not await du.confirm(ctx.message, f"Send `{text[:150]}` to **{target.display_name}**? "
                                              "It looks destructive."):
-            return {"status": "cancelled by requester"}
+            return {"status": "not confirmed (cancelled, or no button press in time), nothing was done"}
     content = f"{target.mention} {text}" if mention else text
     after_id = ch.last_message_id or 0
     collector = asyncio.create_task(_collect(ctx.bot, ch.id, target.id, after_id, wait))

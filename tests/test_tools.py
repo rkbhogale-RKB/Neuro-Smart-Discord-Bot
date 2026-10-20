@@ -250,6 +250,36 @@ def test_action_router_regex():
     assert not agent.ACTION_RE.search("lol that was great")
 
 
+# ---------------------------------------------------------------- "me" + claim guard
+def test_me_resolves_to_author():
+    assert du.resolve_member(guild, "me", author=hardik)[0] is hardik
+    assert du.resolve_member(guild, "@Myself", author=bob)[0] is bob
+    assert du.resolve_member(guild, "me")[0] is None                     # no author given: normal lookup
+
+
+def test_dm_myself():
+    before = len(bob.dms)
+    r = run(registry.execute("dm_member", {"member": "me", "text": "hello self"}, ctx_for(bob)))
+    assert r["status"] == "dm_sent" and len(bob.dms) == before + 1 and "hello self" in bob.dms[-1]
+
+
+def test_claim_guard():
+    assert agent.unbacked_claims("Done, I DMed you!", set())
+    assert agent.unbacked_claims("sent you a DM, check it", set())
+    assert not agent.unbacked_claims("Done, I DMed you!", {"dm_member"})
+    assert agent.unbacked_claims("Hardik has been kicked", {"dm_member"})   # wrong tool doesn't count
+    assert agent.unbacked_claims("banned him", {"kick_member"})
+    assert not agent.unbacked_claims("I can DM people if you tell me what to say", set())
+    assert not agent.unbacked_claims("lol that was funny", set())
+
+
+def test_action_succeeded():
+    ok = agent.action_succeeded
+    assert ok({"status": "dm_sent"}) and ok({"status": "pinged"})
+    assert not ok({"error": "x"}) and not ok({"slash_only": True})
+    assert not ok({"status": "not confirmed (cancelled, or no button press in time), nothing was done"})
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]
     for n, f in tests:
