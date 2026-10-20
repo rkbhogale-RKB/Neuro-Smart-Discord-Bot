@@ -21,6 +21,7 @@ import event_log
 import reminders
 from tools import app_tools, moderation_tools, server_tools, social_tools   # noqa: F401  (importing registers the tools)
 from tools import reminder_tools, warning_tools   # noqa: F401
+from tools import builder_tools, manage_tools   # noqa: F401
 from tools import discord_utils as du
 from tools.registry import ToolContext
 
@@ -450,6 +451,20 @@ async def neuro_reminders(interaction: discord.Interaction):
     else:
         text = "**Your reminders**\n" + "\n".join(
             f"#{r['id']} {r['when']} ({r['repeat']}) for {r['for']}: {r['text']}" for r in res["reminders"])
+    await interaction.followup.send(text[:1900], ephemeral=True, allowed_mentions=NO_PINGS)
+
+
+@neuro.command(name="builds", description="Show recent builds and edits (use 'undo build' in chat to reverse one)")
+async def neuro_builds(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    perms = interaction.user.guild_permissions
+    if not (perms.manage_channels or perms.administrator or interaction.user.id == config.OWNER_ID):
+        await interaction.followup.send("You need the Manage Channels permission.", ephemeral=True)
+        return
+    rows = await db.recent_builds(interaction.guild.id, 10)
+    text = "**Recent builds / edits**\n" + "\n".join(
+        f"#{r['id']} {r['kind']}: {r['title']}" + (" (undone)" if r["undone"] else "") for r in rows) \
+        if rows else "No builds yet."
     await interaction.followup.send(text[:1900], ephemeral=True, allowed_mentions=NO_PINGS)
 
 
