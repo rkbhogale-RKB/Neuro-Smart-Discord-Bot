@@ -82,3 +82,21 @@ It then records, depending on `EVENT_LOG_EVENTS`:
 With the **View Audit Log** permission it also says who did it (kick, ban, timeout, role change).
 Messages in `/noshare` channels are logged without their content. Moderation actions (timeout, kick,
 ban, warn...) go to the same channel.
+
+## Server builder (Manage Channels / Manage Roles)
+Say what you need in plain words, e.g. *"neuro, there's a tournament coming, make group channels for it, some players have joined"*.
+Neuro decides what's useful and shows a **preview with Confirm / Cancel buttons**. Nothing is created until you press Confirm.
+- **One new category, 1 to 6 channels** (`BUILD_MAX_CHANNELS`, default 6; fewer is fine) and up to 4 new roles (`BUILD_MAX_ROLES`).
+  Channel types: text, voice, announcement, forum (announcement/forum need the Community feature). Channels can be private
+  (visible only to chosen roles), read-only, have a topic, slowmode, and a first message that can be pinned.
+- New roles have **no permissions**; they only unlock channels. Names are cleaned, `@everyone`/`@here` can't be used.
+- **Change the plan** before building: *"rename that channel to game-room"*, *"that role was wrong, call it Finalist and make it blue"*,
+  *"drop the voice channel"*, *"add a forum"*. Each change posts a new preview. *"never mind"* cancels. Plans expire after `BUILD_DRAFT_MINUTES` (20).
+- **Undo:** *"undo build"* removes exactly what Neuro made (a category only if it is empty); asks for a Confirm button.
+  `/neuro builds` lists recent builds. Every build is recorded in the database and the log channel.
+
+### Editing existing things (only when you ask)
+*"rename #general to lounge"*, *"change the topic of #rules"*, *"move #clips to the Media category"*, *"make the Staff role red"*,
+*"hide #staff-chat from everyone"*, *"give bob the Finalist role"*, *"post this announcement in #news"*, *"delete the Old Stuff category"*.
+Edits can be undone with *"undo that"*; deleting can't, so it needs a Confirm button. Neuro never edits, deletes or posts on its own.
+Roles above Neuro's (or above yours) can't be touched; announcements never ping @everyone/@here.

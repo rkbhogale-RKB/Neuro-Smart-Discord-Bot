@@ -97,6 +97,28 @@ CREATE TABLE IF NOT EXISTS reminders (
 );
 CREATE INDEX IF NOT EXISTS idx_rem_due ON reminders(sent, due_ts);
 
+-- Server builder history. kind: build | edit | delete. Every thing Neuro creates or changes is
+-- recorded item by item (with the old values for edits) so "undo" is exact.
+CREATE TABLE IF NOT EXISTS builds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    created_ts REAL NOT NULL,
+    undone INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_builds ON builds(server_id, user_id, created_ts);
+CREATE TABLE IF NOT EXISTS build_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    build_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    discord_id INTEGER,
+    name TEXT,
+    data TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_build_items ON build_items(build_id);
+
 -- Per-server settings changed from Discord (e.g. /neuro setlog).
 CREATE TABLE IF NOT EXISTS guild_settings (
     server_id INTEGER PRIMARY KEY,
@@ -383,3 +405,58 @@ async def set_log_channel(server_id: int, channel_id: int | None) -> None:
         " ON CONFLICT(server_id) DO UPDATE SET log_channel_id=excluded.log_channel_id",
         (server_id, channel_id))
     await _db.commit()
+
+
+# ---------- server builder history ----------
+async def create_build(server_id: int, user_id: int, title: str, kind: str) -> int:
+    cur = await _db.execute(
+        "INSERT INTO builds(server_id, user_id, title, kind, created_ts) VALUES (?,?,?,?,?)",
+        (server_id, user_id, title[:80], kind, time.time()))
+    await _db.commit()
+    return cur.lastrowid
+
+
+async def add_build_item(build_id: int, kind: str, discord_id: int | None, name: str, data: str = "") -> None:
+    await _db.execute("INSERT INTO build_items(build_id, kind, discord_id, name, data) VALUES (?,?,?,?,?)",
+                      (build_id, kind, discord_id, name[:100], data))
+    await _db.commit()
+
+
+async def get_build(build_id: int):
+    cur = await _db.execute("SELECT * FROM builds WHERE id=?", (build_id,))
+    return await cur.fetchone()
+
+
+async def build_items(build_id: int):
+    cur = await _db.execute("SELECT * FROM build_items WHERE build_id=? ORDER BY id", (build_id,))
+    return await cur.fetchall()
+
+
+async def last_build(server_id: int, user_id: int | None = None, kinds=("build", "edit")):
+    """Newest build that is not undone yet (by this user if given)."""
+    marks = ",".join("?" * len(kinds))
+    sql = f"SELECT * FROM builds WHERE server_id=? AND undone=0 AND kind IN ({marks})"
+    args: list = [server_id, *kinds]
+    if user_id is not None:
+        sql += " AND user_id=?"
+        args.append(user_id)
+    cur = await _db.execute(sql + " ORDER BY id DESC LIMIT 1", args)
+    return await cur.fetchone()
+
+
+async def recent_builds(server_id: int, limit: int = 10):
+    cur = await _db.execute("SELECT * FROM builds WHERE server_id=? ORDER BY id DESC LIMIT ?",
+                            (server_id, limit))
+    return await cur.fetchall()
+
+
+async def mark_build_undone(build_id: int) -> None:
+    await _db.execute("UPDATE builds SET undone=1 WHERE id=?", (build_id,))
+    await _db.commit()
+
+
+async def count_builds_since(server_id: int, since_ts: float, kind: str = "build") -> int:
+    cur = await _db.execute(
+        "SELECT COUNT(*) AS c FROM builds WHERE server_id=? AND kind=? AND created_ts>?",
+        (server_id, kind, since_ts))
+    return (await cur.fetchone())["c"]

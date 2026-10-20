@@ -123,3 +123,13 @@ EVENT_LOG_CHANNEL_ID = int(os.getenv("EVENT_LOG_CHANNEL_ID") or 0)
 EVENT_LOG_EVENTS = {e.strip().lower() for e in os.getenv(
     "EVENT_LOG_EVENTS", "messages,members,roles,channels,bans").split(",") if e.strip()}
 NEW_ACCOUNT_DAYS = int(os.getenv("NEW_ACCOUNT_DAYS", "7"))    # joins from accounts younger than this are flagged
+
+
+# ---- Server builder (channels / roles from plain language, always with a Confirm button) ----
+BUILD_MAX_CHANNELS = max(1, int(os.getenv("BUILD_MAX_CHANNELS", "6")))   # channels per build
+BUILD_MAX_ROLES = max(0, int(os.getenv("BUILD_MAX_ROLES", "4")))         # new roles per build
+BUILD_PER_DAY = int(os.getenv("BUILD_PER_DAY", "10"))                    # confirmed builds per server per day
+BUILD_DRAFT_MINUTES = int(os.getenv("BUILD_DRAFT_MINUTES", "20"))        # how long a plan waits for Confirm
+BUILD_STEP_DELAY = float(os.getenv("BUILD_STEP_DELAY", "0.5"))           # pause between Discord calls
+BUILD_MAX_INTRO = 1500                                                   # chars in a channel's first message
+BUILD_TOOL_PERMISSION = os.getenv("BUILD_TOOL_PERMISSION", "mod").strip().lower()   # mod | everyone | owner
