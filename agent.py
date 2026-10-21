@@ -28,7 +28,7 @@ ACTION_RE = re.compile(
     r"message|tell|ask|run|send|use|execute|command|list|show|who|whos|members?|channels?|roles?|"
     r"voice|online|server|info|find|check|analy[sz]e|explain|bots?|apps?|warn\w*|strikes?|remind\w*|"
     r"cancel|schedule|build|builds?|create|make|setup|rename|edit|change|undo|revise|move|hide|"
-    r"summar\w*|recap|happen\w*|catch\s*(?:me\s*)?up|missed|set up|section|announce\w*|post|categor\w*|confirm|group)\b)", re.I)
+    r"play\w*|games?|riddles?|trivia|quiz|scramble|tic|20|leaderboard|scores?|summar\w*|recap|happen\w*|catch\s*(?:me\s*)?up|missed|set up|section|announce\w*|post|categor\w*|confirm|group)\b)", re.I)
 
 # Past-tense claims in a reply -> the tool(s) that must have succeeded for the claim to be true.
 CLAIMS = [
@@ -51,6 +51,9 @@ CLAIMS = [
     (re.compile(r"\b(undid|rolled back|reverted)\b", re.I), {"undo_build"}),
     (re.compile(r"\bdeleted (?:the )?(?:channel|role|category)\b", re.I), {"delete_item"}),
     (re.compile(r"\b(?:gave|given|removed)\b[^.\n]{0,40}\brole\b", re.I), {"change_member_role"}),
+    (re.compile(r"\b(?:i(?:'ve| have)? )?(?:started|kicked off|set up) (?:a |the |your )?(?:game|riddles?|trivia|quiz)\b", re.I),
+     {"start_game"}),
+    (re.compile(r"\b(?:i(?:'ve| have)? )?(?:stopped|ended) (?:the )?game\b", re.I), {"stop_game"}),
     (re.compile(r"\b(purged|deleted (?:the |\d+ )?(?:last )?\d*\s*messages?)\b", re.I), {"purge_messages"}),
 ]
 UNDONE = ("I didn't actually do that, yaar: no action ran on my side. Tell me exactly what to do, "
@@ -76,6 +79,7 @@ def unbacked_claims(reply: str, done: set[str]) -> bool:
 # Last few tool runs per server, shown by /neuro debug.
 TRACES: dict[int, collections.deque] = collections.defaultdict(lambda: collections.deque(maxlen=8))
 
+SILENT = "<<silent>>"      # a tool already posted the whole answer (a game, say): send no extra reply
 FALLBACK = "My brain just froze, yaar. Try again in a bit."
 # Used when a tool already ran fine but the model failed to phrase the reply.
 TOOL_DONE_FALLBACK = "Done, yaar. Couldn't phrase a proper reply, but it went through."
@@ -185,9 +189,11 @@ async def run_agent(ctx: ToolContext, user_text: str, reason: str = "mention") -
         # functionResponse parts. Replaying those structured parts is what many models
         # (Gemma especially) answer with a 500 INTERNAL; plain text works on every model.
         lines = []
+        results = []
         for c in calls:
             args = dict(c.args or {})
             result = await registry.execute(c.name, args, ctx)
+            results.append(result)
             log.info("tool %s(%s) -> %s", c.name, args, str(result)[:200])
             if not (isinstance(result, dict) and "error" in result):
                 tools_ok = True
@@ -197,6 +203,13 @@ async def run_agent(ctx: ToolContext, user_text: str, reason: str = "mention") -
                                    "result": str(result)[:200]})
             lines.append(f"- {c.name}({json.dumps(args, ensure_ascii=False)}) -> "
                          f"{json.dumps(result, ensure_ascii=False, default=str)[:2000]}")
+        # A tool that already produced the final answer (a game's own message, a leaderboard) can say so with
+        # "direct_reply": no second model call is needed, which saves the most expensive call of the request.
+        direct = [r["direct_reply"] for r in results if isinstance(r, dict) and action_succeeded(r)
+                  and isinstance(r.get("direct_reply"), str)]
+        if direct and len(direct) == len(calls):
+            trace["steps"].append("(answered directly by the tool, no second model call)")
+            return "\n".join(d for d in direct if d) or SILENT
         contents[0].parts.append(types.Part(text=(
             "\n\n<tool_results>\n" + "\n".join(lines) + "\n</tool_results>\n"
             "These tools were already run for you. If the user's request still needs another tool "

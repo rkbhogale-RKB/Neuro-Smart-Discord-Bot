@@ -112,3 +112,25 @@ grouped by category, and writes a short summary: one or two lines per active cha
   Discord itself (one request per channel, max 25 per recap, never twice within 30 minutes) and keeps it. It needs
   View Channel + Read Message History in those channels; `/noshare` and unreadable channels are never fetched.
 - Limit: 20 recaps per person per day.
+
+## Games (anyone)
+Say it in plain words: *"neuro, me and hardik want to play riddles"*. Neuro pings only the people named (you are always
+in), posts the rules and starts. Games run in the current channel, one per channel (max `GAME_MAX_PER_SERVER` per server).
+
+| Game | How it plays |
+|---|---|
+| **Riddles** | type the answer; `hint` (-1 point, up to 2), `skip`. "I think it's a clock" and one-typo answers count. easy/medium/hard |
+| **Trivia** | tap the answer button; one try per question; categories: general, science, geography, history, entertainment, tech |
+| **Word scramble** | unscramble the word; `hint` reveals letters |
+| **20 Questions** | Neuro thinks of something; ask yes/no questions, guess with `Is it ...?`; `hint`, `give up` |
+| **Tic-Tac-Toe** | button board; two players, or against Neuro (no players named) |
+
+Say `stop` (or "neuro stop game") to end; `score` shows the standings. 3 points for riddles, 2 for trivia/scramble,
+first correct answer wins the round. `/neuro leaderboard` or "show the leaderboard" shows the server board.
+
+**Token and call savings:** 60 riddles, 64 trivia questions and 94 scramble words are built in, so rounds need no model call.
+Players' messages are checked in code and never reach the model; wrong guesses get no reaction; the start/stop/leaderboard
+tools answer directly (no second model call). The only model use is 20 Questions: one tiny call per question (the answer is
+forced to Yes/No/Sometimes/Irrelevant, and guesses are checked in code). Games end on their own after
+`GAME_IDLE_MINUTES` of silence or two unanswered rounds. Games live in memory (a restart ends them); scores are saved.
+Settings: see `.env.example` (`GAMES_ENABLED`, `GAME_*`).

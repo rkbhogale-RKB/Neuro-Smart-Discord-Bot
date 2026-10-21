@@ -21,7 +21,8 @@ import event_log
 import reminders
 from tools import app_tools, moderation_tools, server_tools, social_tools   # noqa: F401  (importing registers the tools)
 from tools import reminder_tools, warning_tools   # noqa: F401
-from tools import builder_tools, manage_tools, digest_tools   # noqa: F401
+from tools import builder_tools, manage_tools, digest_tools, game_tools   # noqa: F401
+import games
 from tools import discord_utils as du
 from tools.registry import ToolContext
 
@@ -152,6 +153,10 @@ async def on_message(message: discord.Message):
     if await automod.check(message):
         return
 
+    # A running game gets its players' messages first: answers are checked in code, no model call.
+    if config.GAMES_ENABLED and await games.handle_message(message, bot.user.id):
+        return
+
     # Log every human message (clean_content = mentions turned into names).
     if message.content:
         await db.log_message(message.id, message.guild.id, message.channel.id,
@@ -200,6 +205,10 @@ async def on_message(message: discord.Message):
         if reason not in EXPLICIT:
             return                  # never post error noise for a message that may not be for us
         reply = "My brain glitched for a sec. Try again in a bit, yaar."
+
+    if reply == agent.SILENT:
+        await db.record_interaction(message.guild.id, message.channel.id, message.author.id)
+        return                      # a tool (a game) already posted everything
 
     if reply.strip().upper().startswith("NO_REPLY"):
         if reason not in EXPLICIT:
@@ -466,6 +475,12 @@ async def neuro_builds(interaction: discord.Interaction):
         f"#{r['id']} {r['kind']}: {r['title']}" + (" (undone)" if r["undone"] else "") for r in rows) \
         if rows else "No builds yet."
     await interaction.followup.send(text[:1900], ephemeral=True, allowed_mentions=NO_PINGS)
+
+
+@neuro.command(name="leaderboard", description="Show the game leaderboard")
+async def neuro_leaderboard(interaction: discord.Interaction):
+    await interaction.response.defer()
+    await interaction.followup.send(await game_tools.leaderboard_text(interaction.guild), allowed_mentions=NO_PINGS)
 
 
 bot.tree.add_command(neuro)

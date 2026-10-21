@@ -133,3 +133,16 @@ BUILD_DRAFT_MINUTES = int(os.getenv("BUILD_DRAFT_MINUTES", "20"))        # how l
 BUILD_STEP_DELAY = float(os.getenv("BUILD_STEP_DELAY", "0.5"))           # pause between Discord calls
 BUILD_MAX_INTRO = 1500                                                   # chars in a channel's first message
 BUILD_TOOL_PERMISSION = os.getenv("BUILD_TOOL_PERMISSION", "mod").strip().lower()   # mod | everyone | owner
+
+
+# ---- Games (riddles, trivia, word scramble, 20 questions, tic-tac-toe) ----
+# Rounds are answered in code from built-in banks: no model call per round (only 20 questions uses one tiny call per question).
+GAMES_ENABLED = _flag("GAMES_ENABLED", True)
+GAME_DEFAULT_ROUNDS = int(os.getenv("GAME_DEFAULT_ROUNDS", "5"))
+GAME_MAX_ROUNDS = int(os.getenv("GAME_MAX_ROUNDS", "10"))
+GAME_MAX_PER_SERVER = int(os.getenv("GAME_MAX_PER_SERVER", "3"))     # games running at once per server
+GAME_IDLE_MINUTES = int(os.getenv("GAME_IDLE_MINUTES", "10"))        # a game nobody touches ends by itself
+GAME_RIDDLE_SECONDS = int(os.getenv("GAME_RIDDLE_SECONDS", "60"))
+GAME_TRIVIA_SECONDS = int(os.getenv("GAME_TRIVIA_SECONDS", "25"))
+GAME_SCRAMBLE_SECONDS = int(os.getenv("GAME_SCRAMBLE_SECONDS", "40"))
+GAME_TOOL_PERMISSION = os.getenv("GAME_TOOL_PERMISSION", "everyone").strip().lower()   # mod | everyone | owner
