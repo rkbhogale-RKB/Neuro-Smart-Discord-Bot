@@ -43,6 +43,9 @@ CLAIMS = [
                 r"reminding you)\b", re.I), {"set_reminder"}),
     (re.compile(r"\b(?:i(?:'ve| have)? )?(?:created|built|set up|made) (?:the |all |your |these |those |\d+ )?(?:new )?"
                 r"(?:channels?|roles?|categor(?:y|ies))\b", re.I), {"_button_only"}),   # only the Confirm button builds
+    # talking about a Confirm button / plan preview that was never posted
+    (re.compile(r"\b(?:press|click|hit|tap|use)\b[^.\n]{0,40}\b(?:confirm|button)\b|"
+                r"\b(?:preview|plan)\b[^.\n]{0,25}\b(?:above|below|posted)\b", re.I), {"propose_build", "revise_build"}),
     (re.compile(r"\b(renamed|recolou?red|re-?coloured|moved (?:the )?channel|re-?topic(?:ed)?)\b", re.I),
      {"edit_channel", "edit_role"}),
     (re.compile(r"\b(undid|rolled back|reverted)\b", re.I), {"undo_build"}),

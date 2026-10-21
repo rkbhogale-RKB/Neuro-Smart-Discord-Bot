@@ -236,7 +236,7 @@ async def check_flow():
     res = await registry.execute("propose_build", plan(), ctx)
     assert res.get("status") == "preview_posted", res
     assert not [c for c in g.channels if c.name == "cup-announcements"], "nothing may be built before Confirm"
-    assert len(chat.sent) == 1 and chat.sent[0].content is None
+    assert len(chat.sent) == 1 and "Confirm" in chat.sent[0].content
     d = builder.active_draft(1, 2)
     assert d and d.version == 1 and "<build_draft" in builder.prompt_block(1, 2)
 
@@ -348,6 +348,8 @@ def check_agent_rules():
     assert agent.unbacked_claims("Done! I created the channels for you.", {"propose_build"})
     assert agent.unbacked_claims("I've built the category and roles.", set())
     assert not agent.unbacked_claims("Here's the plan, press Confirm to build it.", {"propose_build"})
+    assert agent.unbacked_claims("Here is the plan, press Confirm below.", set())
+    assert not agent.unbacked_claims("Here is the plan, press Confirm below.", {"propose_build"})
     assert agent.unbacked_claims("Renamed the channel.", set()) and not agent.unbacked_claims("Renamed it.", {"edit_channel"})
 
 

@@ -52,7 +52,13 @@ async def _show(ctx, raw: dict, what: str):
         return {"error": "plan not valid, fix and call again", "problems": errs}
     if (why := builder.check_permissions(guild, author, plan)):
         return {"error": why}
-    draft = await builder.set_draft(ctx.bot, ctx.message.channel, guild.id, author.id, raw, plan)
+    try:
+        draft = await builder.set_draft(ctx.bot, ctx.message.channel, guild.id, author.id, raw, plan)
+    except Exception as e:
+        builder.cancel_draft(guild.id, author.id)
+        builder.log.exception("could not post build preview")
+        return {"error": f"couldn't post the preview in this channel: {getattr(e, 'text', '') or type(e).__name__}. "
+                         "Check that I can Send Messages and Embed Links here"}
     return {"status": what, "version": draft.version, "channels": len(plan["channels"]),
             "roles": len(plan["roles"]),
             "note": "A preview with Confirm/Cancel buttons was posted. Tell the user briefly what you planned "
