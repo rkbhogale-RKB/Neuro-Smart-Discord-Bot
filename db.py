@@ -119,6 +119,16 @@ CREATE TABLE IF NOT EXISTS build_items (
 );
 CREATE INDEX IF NOT EXISTS idx_build_items ON build_items(build_id);
 
+-- Game leaderboard (per server).
+CREATE TABLE IF NOT EXISTS game_scores (
+    server_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    points INTEGER NOT NULL DEFAULT 0,
+    wins INTEGER NOT NULL DEFAULT 0,
+    games INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (server_id, user_id)
+);
+
 -- Per-server settings changed from Discord (e.g. /neuro setlog).
 CREATE TABLE IF NOT EXISTS guild_settings (
     server_id INTEGER PRIMARY KEY,
@@ -474,3 +484,28 @@ async def count_builds_since(server_id: int, since_ts: float, kind: str = "build
         "SELECT COUNT(*) AS c FROM builds WHERE server_id=? AND kind=? AND created_ts>?",
         (server_id, kind, since_ts))
     return (await cur.fetchone())["c"]
+
+
+# ---------- game leaderboard ----------
+async def record_game(server_id: int, results) -> None:
+    """results: iterable of (user_id, points, won). One row per person, counts one game each."""
+    for uid, pts, won in results:
+        await _db.execute(
+            "INSERT INTO game_scores(server_id, user_id, points, wins, games) VALUES (?,?,?,?,1)"
+            " ON CONFLICT(server_id, user_id) DO UPDATE SET points=points+excluded.points,"
+            " wins=wins+excluded.wins, games=games+1",
+            (server_id, uid, int(pts), int(bool(won))))
+    await _db.commit()
+
+
+async def top_scores(server_id: int, limit: int = 10):
+    cur = await _db.execute(
+        "SELECT user_id, points, wins, games FROM game_scores WHERE server_id=?"
+        " ORDER BY points DESC, wins DESC LIMIT ?", (server_id, limit))
+    return await cur.fetchall()
+
+
+async def user_score(server_id: int, user_id: int):
+    cur = await _db.execute(
+        "SELECT points, wins, games FROM game_scores WHERE server_id=? AND user_id=?", (server_id, user_id))
+    return await cur.fetchone()
