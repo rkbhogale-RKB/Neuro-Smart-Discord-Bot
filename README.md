@@ -100,3 +100,12 @@ Neuro decides what's useful and shows a **preview with Confirm / Cancel buttons*
 *"hide #staff-chat from everyone"*, *"give bob the Finalist role"*, *"post this announcement in #news"*, *"delete the Old Stuff category"*.
 Edits can be undone with *"undo that"*; deleting can't, so it needs a Confirm button. Neuro never edits, deletes or posts on its own.
 Roles above Neuro's (or above yours) can't be touched; announcements never ping @everyone/@here.
+
+## Server recap ("what happened across channels?")
+Anyone can ask: *"neuro, what happened across channels?"*, *"catch me up on the Games category"*, *"summarize #general"*.
+Neuro reads the last 5-15 messages (default 12) of each channel from its own message log (no Discord API calls),
+grouped by category, and writes a short summary: one or two lines per active channel. Token use is capped
+(about 9,000 characters of chat per recap, 30 busiest channels, messages clipped to 140 characters).
+- Only channels the person asking can see; `/noshare` channels and the log channel are skipped.
+- Looks back 48 hours by default (up to 7 days: "what happened this week").
+- Only knows messages sent while the bot was online. Limit: 20 recaps per person per day.

@@ -169,6 +169,20 @@ async def recent_messages(channel_id: int, n: int, exclude_msg_id: int | None = 
     return list(reversed(rows))
 
 
+async def digest_rows(server_id: int, since_ts: float, per_channel: int):
+    """Newest `per_channel` human messages of every channel since since_ts, plus how many there were
+    in total (one query, no Discord API calls). Rows come oldest-first inside each channel."""
+    cur = await _db.execute(
+        "SELECT channel_id, author_name, content, ts, total FROM ("
+        " SELECT channel_id, author_name, content, ts,"
+        "  ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY ts DESC) AS rn,"
+        "  COUNT(*) OVER (PARTITION BY channel_id) AS total"
+        " FROM messages WHERE server_id=? AND ts>=? AND is_bot=0 AND author_name NOT LIKE '% [app]')"
+        " WHERE rn<=? ORDER BY channel_id, ts",
+        (server_id, since_ts, per_channel))
+    return await cur.fetchall()
+
+
 async def recent_messages_by_user(server_id: int, user_id: int, n: int):
     """Latest logged messages from one person in a server (oldest first). Used by mod tools."""
     cur = await _db.execute(

@@ -28,7 +28,7 @@ ACTION_RE = re.compile(
     r"message|tell|ask|run|send|use|execute|command|list|show|who|whos|members?|channels?|roles?|"
     r"voice|online|server|info|find|check|analy[sz]e|explain|bots?|apps?|warn\w*|strikes?|remind\w*|"
     r"cancel|schedule|build|builds?|create|make|setup|rename|edit|change|undo|revise|move|hide|"
-    r"set up|section|announce\w*|post|categor\w*|confirm|group)\b)", re.I)
+    r"summar\w*|recap|happen\w*|catch\s*(?:me\s*)?up|missed|set up|section|announce\w*|post|categor\w*|confirm|group)\b)", re.I)
 
 # Past-tense claims in a reply -> the tool(s) that must have succeeded for the claim to be true.
 CLAIMS = [
