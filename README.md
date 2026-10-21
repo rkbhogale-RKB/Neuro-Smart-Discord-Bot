@@ -103,9 +103,12 @@ Roles above Neuro's (or above yours) can't be touched; announcements never ping 
 
 ## Server recap ("what happened across channels?")
 Anyone can ask: *"neuro, what happened across channels?"*, *"catch me up on the Games category"*, *"summarize #general"*.
-Neuro reads the last 5-15 messages (default 12) of each channel from its own message log (no Discord API calls),
+Neuro reads the last 5-15 messages (default 12) of each channel from its own message log,
 grouped by category, and writes a short summary: one or two lines per active channel. Token use is capped
 (about 9,000 characters of chat per recap, 30 busiest channels, messages clipped to 140 characters).
 - Only channels the person asking can see; `/noshare` channels and the log channel are skipped.
-- Looks back 48 hours by default (up to 7 days: "what happened this week").
-- Only knows messages sent while the bot was online. Limit: 20 recaps per person per day.
+- Looks back 48 hours by default (up to 30 days: "what happened this week / this month").
+- **Bot added recently?** Where its log is thin (a new bot, or quiet channels) Neuro fetches the recent history from
+  Discord itself (one request per channel, max 25 per recap, never twice within 30 minutes) and keeps it. It needs
+  View Channel + Read Message History in those channels; `/noshare` and unreadable channels are never fetched.
+- Limit: 20 recaps per person per day.

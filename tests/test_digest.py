@@ -22,10 +22,23 @@ from tools.registry import registry  # noqa: E402
 N = pytypes.SimpleNamespace
 
 
-def chan(id, name, cat, can_view=True):
-    c = N(id=id, name=name, type="text", category=cat)
+def chan(id, name, cat, can_view=True, past=()):
+    """past = messages that exist on Discord from before the bot joined (newest first)."""
+    c = N(id=id, name=name, type="text", category=cat, fetches=0)
     c.permissions_for = lambda m: N(view_channel=can_view, read_message_history=can_view)
+
+    async def history(limit=None, after=None, oldest_first=False):
+        c.fetches += 1
+        for m in list(past)[:limit]:
+            yield m
+    c.history = history
     return c
+
+
+def old(id, who, text, bot=False, ago=3600):
+    return N(id=id, author=N(id=50 + id, display_name=who, bot=bot), content=text, clean_content=text,
+             created_at=__import__("datetime").datetime.fromtimestamp(time.time() - ago,
+                                                                       __import__("datetime").timezone.utc))
 
 
 async def _all():
@@ -35,7 +48,11 @@ async def _all():
         game, chat = N(name="Games"), N(name="Chat")
         chans = [chan(1, "scrims", game), chan(2, "general", chat), chan(3, "secret", chat, can_view=False),
                  chan(4, "private", chat), chan(5, "quiet", chat)]
-        guild = N(id=1, channels=chans, get_channel=lambda i: None)
+        newbie = chan(6, "announcements", chat, past=[old(9002, "mod", "Tournament starts Friday"),
+                                                      old(9001, "Bolt", "bot spam", bot=True),
+                                                      old(9000, "ann", "who is in?")])
+        chans.append(newbie)
+        guild = N(id=1, channels=chans, get_channel=lambda i: None, me=N(id=99))
         author = N(id=7)
         ctx = N(user_id=7, channel_id=2, server_id=1, bot=None, message=N(guild=guild, author=author))
         now, mid = time.time(), 1
@@ -58,10 +75,18 @@ async def _all():
         assert "app noise" not in text and "!help" not in text
         assert r["hidden_channels"] == 2
 
+        # channel the bot has no log for: fetched from Discord history, bots skipped, stored, not refetched
+        assert "Tournament starts Friday" in text and "who is in?" in text and "bot spam" not in text
+        assert "#announcements (2+ msgs" in text and newbie.fetches == 1
+        assert chans[3].fetches == 0, "/noshare channel must never be fetched"
+        assert chans[2].fetches == 0, "unreadable channel must never be fetched"
+        again = await registry.execute("server_digest", {}, ctx)
+        assert newbie.fetches == 1 and "Tournament starts Friday" in again["summary_input"]
+
         only = await registry.execute("server_digest", {"category": "games"}, ctx)
         assert "## Chat" not in only["summary_input"]
         none = await registry.execute("server_digest", {"channel": "quiet"}, ctx)
-        assert none["summary_input"] == "" and "No recent" in none["note"]
+        assert none["summary_input"] == "" and "No messages found" in none["note"]
 
         # token cap on a large server
         for i in range(40):
