@@ -523,8 +523,14 @@ class BuildPreview(discord.ui.View):
 
 async def post_preview(bot, channel, draft: Draft) -> None:
     title, body = render_preview(draft.plan, draft.version)
-    embed = discord.Embed(title=title, description=body)
-    draft.message = await channel.send(embed=embed, view=BuildPreview(bot, draft), allowed_mentions=du.NO_PINGS)
+    head = f"**{title}**\n⬇️ Press **Confirm & build** below to create it, or **Cancel**."
+    view = BuildPreview(bot, draft)
+    try:                                               # embed + buttons
+        draft.message = await channel.send(head, embed=discord.Embed(description=body), view=view,
+                                           allowed_mentions=du.NO_PINGS)
+    except discord.HTTPException as e:                 # e.g. no Embed Links permission: plain text + buttons
+        log.warning("embed preview failed (%s), sending plain text", e)
+        draft.message = await channel.send((head + "\n\n" + body)[:1990], view=view, allowed_mentions=du.NO_PINGS)
 
 
 async def set_draft(bot, channel, guild_id: int, user_id: int, raw: dict, plan: dict) -> Draft:
