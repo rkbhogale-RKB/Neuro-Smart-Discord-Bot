@@ -140,13 +140,15 @@ forced to Yes/No/Sometimes/Irrelevant, and guesses are checked in code). Games e
 Settings: see `.env.example` (`GAMES_ENABLED`, `GAME_*`).
 
 ## Web search, pictures and GIFs (anyone, only when asked)
-- **Search:** *"neuro, search the latest on the new iPhone"*, *"google who won the match"*. Uses Gemini's built-in Google Search
-  grounding (no extra key, uses `SEARCH_MODEL`, default `gemini-2.5-flash`). The answer is short, posted straight to the chat with source links.
-  One search = one model call; limit 12 per person per day. Not used for chit-chat or things Neuro already knows.
+- **Search:** *"neuro, search the latest on the new iPhone"*, *"google who won the match"*. Default (`SEARCH_PROVIDER=auto`):
+  free web results from the **ddgs** package (no key, no quota; run `pip install -r requirements.txt` after updating), summarised
+  by your normal `ANSWER_MODEL` in one cheap call, with source links. If that fails it falls back to Gemini's Google Search grounding
+  (`SEARCH_MODEL`; free up to ~500/day on Gemini 2.5, **not** available on the free tier of newer models). Set `SEARCH_PROVIDER=ddgs`
+  to never use Gemini grounding. If everything fails, the error tells you why. Limit 12 per person per day.
 - **Pictures:** *"send a picture of a red panda"*, *"show me 3 photos of Mount Fuji"*. Sources in order: Pexels (if `PEXELS_API_KEY`
-  is set, free), DuckDuckGo images, Wikimedia Commons. Images are downloaded by the bot (public hosts only, size-capped, checked to be
+  is set, free), ddgs image search, DuckDuckGo, Wikimedia Commons (the bot sends a proper User-Agent; Wikimedia refuses anonymous ones). Images are downloaded by the bot (public hosts only, size-capped, checked to be
   real images) and uploaded with a credit line, so they show even if the source blocks hotlinking. Needs **Attach Files** + **Embed Links**.
-  Searches with blocked words (`WEB_BLOCKED_WORDS`) are refused. DuckDuckGo is an unofficial source and can stop working; Pexels is more reliable.
+  Searches with blocked words (`WEB_BLOCKED_WORDS`) are refused. ddgs/DuckDuckGo are unofficial and can be rate-limited; Pexels is the most reliable.
 - **GIFs:** *"send a gif for good morning"*, or reply to someone's message with *"@Neuro react to this with a gif"* and the GIF is sent as a
   reply to that message. Needs a free **`GIPHY_API_KEY`** (developers.giphy.com; Tenor shut its API down in 2026). `GIF_RATING` defaults to `pg`.
 - Nothing here runs on its own: no automatic GIF reactions, so there are no extra calls. `/neuro status` shows whether the GIF key is set.

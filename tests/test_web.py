@@ -20,6 +20,7 @@ from tools import web_tools  # noqa: E402,F401
 from tools.registry import registry  # noqa: E402
 
 N = pytypes.SimpleNamespace
+_ORIG = (web._ddgs_images, web._ddg, web._commons, web._pexels, web._ddgs_text, web._html_text)
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 20
 
 
@@ -61,23 +62,81 @@ def check_parsers():
 async def check_provider_chain():
     calls = []
 
-    async def ddg(q, n): calls.append("ddg"); raise RuntimeError("blocked")
+    async def ddgs(q, n): calls.append("ddgs"); raise RuntimeError("not installed")
+
+    async def ddg(q, n): calls.append("ddg"); return []
 
     async def commons(q, n): calls.append("commons"); return [{"url": "https://c/1.jpg", "title": "T", "page": None, "credit": "c"}]
 
     async def pexels(q, n): calls.append("pexels"); return []
-    web._ddg, web._commons, web._pexels = ddg, commons, pexels
+    web._ddgs_images, web._ddg, web._commons, web._pexels = ddgs, ddg, commons, pexels
     config.PEXELS_API_KEY = ""
     r = await web.search_images("tiger", 1)
-    assert calls == ["ddg", "commons"] and len(r) == 1, "a failing provider falls through to the next"
+    assert calls == ["ddgs", "ddg", "commons"] and len(r) == 1, "a failing provider falls through to the next"
     calls.clear()
     config.PEXELS_API_KEY = "k"
     await web.search_images("tiger", 1)
     assert calls[0] == "pexels"
     config.PEXELS_API_KEY = ""
+    assert "NeuroDiscordBot" in web.ua() and "github.com" in web.ua(), "Wikimedia 403s anonymous user agents"
+
+
+async def check_ddgs_package():
+    """The real ddgs package is replaced by a fake module with the same call shape."""
+    seen = {}
+
+    class DDGS:
+        def __init__(self, timeout=None): seen["timeout"] = timeout
+
+        def images(self, q, safesearch=None, max_results=None):
+            seen["img"] = (q, safesearch)
+            return [{"image": "https://x/a.jpg", "title": "Mountain", "url": "https://x", "source": "Bing"}]
+
+        def text(self, q, safesearch=None, max_results=None):
+            seen["txt"] = (q, safesearch, max_results)
+            return [{"title": "Result A", "href": "https://a.example/1", "body": "Alpha facts 2026"},
+                    {"title": "Result B", "href": "https://b.example/2", "body": "Beta facts"}]
+    web._ddgs_images, web._ddg, web._commons, web._pexels, web._ddgs_text, web._html_text = _ORIG
+    sys.modules["ddgs"] = N(DDGS=DDGS)
+    imgs = await web._ddgs_images("mountain", 1)
+    assert imgs[0]["url"] == "https://x/a.jpg" and seen["img"] == ("mountain", "on"), "safe search is on"
+    res, errs = await web.search_text("who won")
+    assert [r["url"] for r in res] == ["https://a.example/1", "https://b.example/2"] and not errs
+    # full answer path: results -> summarised by the normal model; sources come from the results
+    prompts = []
+
+    async def generate(model, contents, system, tools=None, allow_tools=True, temperature=0.8, max_tokens=700):
+        prompts.append((model, contents[0].parts[0].text))
+        return N(text="Alpha happened.")
+    llm.generate = generate
+    config.SEARCH_PROVIDER = "auto"
+    r = await web.web_answer("who won")
+    assert r["text"] == "Alpha happened." and r["sources"][0]["url"] == "https://a.example/1"
+    assert prompts[0][0] == config.ANSWER_MODEL and "Alpha facts 2026" in prompts[0][1] and "<results>" in prompts[0][1]
+
+    async def broken(*a, **k): raise RuntimeError("quota")
+    llm.generate = broken
+    r = await web.web_answer("who won")
+    assert "Result A" in r["text"] and r["sources"], "if the model fails, the raw results are still returned"
+    del sys.modules["ddgs"]
+
+
+def check_html_fallback():
+    html = ('<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fa.example%2Fx&rut=1">Title <b>A</b></a>'
+            '<a class="result__snippet" href="x">Snippet <b>one</b></a>'
+            '<a class="result__a" href="https://b.example/y">Title B</a>')
+    r = web.parse_html_results(html)
+    assert r[0] == {"title": "Title A", "url": "https://a.example/x", "snippet": "Snippet one"}
+    assert r[1]["url"] == "https://b.example/y" and r[1]["snippet"] == ""
+    assert web.parse_html_results("") == []
 
 
 async def check_web_answer():
+    async def no_text(q, n): return []
+
+    async def err_text(q, n): raise RuntimeError("blocked")
+    web._ddgs_text, web._html_text = err_text, no_text
+
     class FakeModels:
         async def generate_content(self, model, contents, config):
             assert model == web.config.SEARCH_MODEL and contents == "who won"
@@ -85,13 +144,20 @@ async def check_web_answer():
             return N(text="The Reds won 2-1.", candidates=[N(grounding_metadata=N(grounding_chunks=[
                 N(web=web_), N(web=web_), N(web=None)]))])
     llm.client = N(aio=N(models=FakeModels()))
-    r = await web.web_answer("who won")
+    config.SEARCH_PROVIDER = "auto"
+    r = await web.web_answer("who won")                       # ddgs fails -> falls back to Gemini grounding
     assert r["text"] == "The Reds won 2-1." and r["sources"] == [{"title": "news.example", "url": "https://news.example/a"}]
+    config.SEARCH_PROVIDER = "ddgs"
+    r = await web.web_answer("who won")
+    assert "error" in r and "ddgs" in r["error"] and "pip install" in r["error"], "the real reason is reported"
 
     class Broken:
-        async def generate_content(self, **kw): raise RuntimeError("quota")
+        async def generate_content(self, **kw): raise RuntimeError("quota exceeded")
     llm.client = N(aio=N(models=Broken()))
-    assert "error" in await web.web_answer("x")
+    config.SEARCH_PROVIDER = "auto"
+    r = await web.web_answer("x")
+    assert "quota exceeded" in r["error"] and "blocked" in r["error"], "both reasons are shown"
+    config.SEARCH_PROVIDER = "auto"
 
 
 # ------------------------------------------------------------------ tools
@@ -194,6 +260,8 @@ async def _all():
         await check_safety()
         check_parsers()
         await check_provider_chain()
+        await check_ddgs_package()
+        check_html_fallback()
         await check_web_answer()
         await check_tools()
     finally:
