@@ -153,7 +153,12 @@ GAME_TOOL_PERMISSION = os.getenv("GAME_TOOL_PERMISSION", "everyone").strip().low
 # ---- Web search, images and GIFs ----
 # Web search uses Gemini's built-in Google Search grounding (no extra key). Images: Pexels (optional key), then
 # DuckDuckGo, then Wikimedia Commons (no keys). GIFs need a free Giphy key (Tenor shut its API down in 2026).
-SEARCH_MODEL = os.getenv("SEARCH_MODEL", "gemini-2.5-flash")      # must be a Gemini model that supports grounding
+# Web search: "ddgs" = free DuckDuckGo-style results (pip package ddgs) summarized by your normal model;
+# "gemini" = Google Search grounding (free quota is limited, not on newer free-tier models); "auto" = ddgs first, then gemini.
+SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "auto").strip().lower()
+SEARCH_MODEL = os.getenv("SEARCH_MODEL", "gemini-2.5-flash")      # only for SEARCH_PROVIDER gemini/auto: a model that supports grounding
+WEB_USER_AGENT = os.getenv("WEB_USER_AGENT", "Mozilla/5.0 (compatible; NeuroDiscordBot/1.0; "
+                           "+https://github.com/rkbhogale-RKB/Neuro-Smart-Discord-Bot)")
 GIPHY_API_KEY = os.getenv("GIPHY_API_KEY", "").strip()
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
 GIF_RATING = os.getenv("GIF_RATING", "pg").strip().lower()         # g | pg | pg-13 | r

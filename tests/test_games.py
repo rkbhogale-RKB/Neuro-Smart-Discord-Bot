@@ -357,9 +357,9 @@ async def check_hangman_wyr():
     wrong = next(c for c in "zqxjkvw" if c not in word)
     assert await say(ch, hardik, wrong) is True and g.item["lives"] == 6 and wrong.upper() in g.msg.content
     assert await say(ch, hardik, wrong) is True and g.item["lives"] == 6, "repeat letters are free"
-    for c in dict.fromkeys(word[:-1] if len(set(word)) > 1 else word):
+    for c in list(dict.fromkeys(word))[:-1]:                      # every distinct letter but one
         await say(ch, ann, c)
-    assert not g.event.is_set() or g.winner
+    assert not g.event.is_set()
     await say(ch, hardik, word)
     await wait_for(lambda: g.round_no == 2 and g.item["word"] != word or 140 not in games.GAMES)
     assert g.scores[11] >= 2 and g.scores.get(10, 0) >= 1

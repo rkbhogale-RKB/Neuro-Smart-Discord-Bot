@@ -49,7 +49,11 @@ def status_report(bot, guild, log_channel_id: int | None = None) -> str:
           "optional: add GIPHY_API_KEY (free at developers.giphy.com); Tenor's API was shut down")
     check(bool(gp.administrator or gp.attach_files), "Attach Files (needed to post pictures)",
           "give Neuro this permission to send images")
-    lines.append(f"ℹ️ Web search model: {config.SEARCH_MODEL}; images from {'Pexels, ' if config.PEXELS_API_KEY else ''}DuckDuckGo, Wikimedia")
+    import web
+    check(web._ddgs_class() is not None, "ddgs installed (free web + image search)",
+          "run `pip install -r requirements.txt` and restart; until then search falls back to weaker scraping")
+    lines.append(f"ℹ️ Web search: {config.SEARCH_PROVIDER} (grounding model {config.SEARCH_MODEL}); "
+                 f"images: {'Pexels, ' if config.PEXELS_API_KEY else ''}ddgs, DuckDuckGo, Wikimedia")
 
     apps = [m for m in guild.members if m.bot and m.id != bot.user.id]
     if apps:
