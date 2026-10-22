@@ -51,6 +51,36 @@ def check_logic():
         assert len(set(seen)) == 8
 
 
+def check_new_logic():
+    b = [""] * 42
+    for r in range(4):                                 # four in a column
+        games.c4_drop(b, 2, "R")
+    assert games.c4_result(b) == "R"
+    b = [""] * 42
+    for c in range(4):
+        games.c4_drop(b, c, "Y")
+    assert games.c4_result(b) == "Y", "four in a row"
+    b = [""] * 42
+    for i in range(4):                                 # diagonal
+        for _ in range(i):
+            games.c4_drop(b, i, "R" if False else "Y")
+        games.c4_drop(b, i, "R")
+    assert games.c4_result(b) == "R", "diagonal"
+    b = [""] * 42
+    for c in range(3):
+        games.c4_drop(b, c, "R")
+    assert games.c4_ai(b, "Y", "R") == 3, "blocks the open three"
+    b = [""] * 42
+    for c in range(3):
+        games.c4_drop(b, c, "Y")
+    assert games.c4_ai(b, "Y", "R") == 3, "takes the win"
+    full = [""] * 42
+    for _ in range(6):
+        games.c4_drop(full, 0, "R")
+    assert games.c4_drop(full, 0, "Y") is None
+    assert len(data.WYR) >= 30 and all(a and b for a, b in data.WYR)
+
+
 def check_data():
     assert len(data.RIDDLES) >= 50 and len(data.TRIVIA) >= 50
     assert all(a for _, _, answers, _ in data.RIDDLES for a in answers)
@@ -274,6 +304,94 @@ async def check_tictactoe():
     assert all(c.disabled for c in g.view.children), "board is locked when the game is stopped"
 
 
+async def check_connect4_rps():
+    ch = Chan(130)
+    await games.start(guild, ch, ann, [hardik], "connect four", bot_id=me.id)
+    g = games.GAMES[130]
+    v = g.view
+    assert len(v.children) == 7 and "Ann" in ch.texts()[0] and "⚪" in ch.texts()[0]
+    t, log = click(hardik, v.children[0]); await t
+    assert ("msg", "Wait for your turn!") in log
+    t, log = click(bob, v.children[0]); await t
+    assert ("msg", "You're not in this game.") in log
+    for who, col in ((ann, 0), (hardik, 1), (ann, 0), (hardik, 1), (ann, 0), (hardik, 1), (ann, 0)):
+        t, log = click(who, v.children[col]); await t
+    assert 130 not in games.GAMES and g.winners == {10} and "wins" in log[-1][1] and "🔴" in log[-1][1]
+    assert all(c.disabled for c in v.children)
+    ch = Chan(131)                                     # against Neuro: it answers in code
+    await games.start(guild, ch, ann, [], "connect4", bot_id=me.id)
+    g = games.GAMES[131]
+    t, log = click(ann, g.view.children[3]); await t
+    assert sum(1 for c in g.board if c) == 2 and g.turn == 10
+    await games.finish(g, None, announce=False)
+
+    ch = Chan(132)
+    await games.start(guild, ch, ann, [hardik], "rock paper scissors", rounds=2, bot_id=me.id)
+    g = games.GAMES[132]
+    v = g.view
+    t, log = click(ann, v.children[0]); await t                      # ann: rock, kept secret
+    assert any(isinstance(x, tuple) and "Locked in" in x[1] for x in log) and not any(x[0] == "edit" for x in log if isinstance(x, tuple))
+    t, log = click(ann, v.children[1]); await t
+    assert ("msg", "You already picked this round.") in log
+    t, log = click(hardik, v.children[2]); await t                   # scissors: rock wins
+    assert log[-1][0] == "edit" and "Ann" in log[-1][1] and "wins the round" in log[-1][1] and g.scores == {10: 1}
+    t, log = click(ann, v.children[0]); await t
+    t, log = click(hardik, v.children[0]); await t                   # draw -> match ends 1-0
+    assert 132 not in games.GAMES and "wins the match 1-0" in log[-1][1] and g.scores[10] == 3
+    ch = Chan(133)
+    await games.start(guild, ch, ann, [], "rps", rounds=1, bot_id=me.id)
+    g = games.GAMES[133]
+    t, log = click(ann, g.view.children[0]); await t
+    assert 133 not in games.GAMES and log[-1][0] == "edit"
+
+
+async def check_hangman_wyr():
+    ch = Chan(140)
+    await games.start(guild, ch, ann, [hardik], "hangman", rounds=2, bot_id=me.id)
+    g = games.GAMES[140]
+    await wait_for(lambda: g.item is not None)
+    word = g.item["word"]
+    assert "_ " in g.msg.content or "_" in g.msg.content
+    assert await say(ch, bob, "e") is False
+    assert await say(ch, hardik, "hello everybody how is it going") is False, "chat is left alone"
+    wrong = next(c for c in "zqxjkvw" if c not in word)
+    assert await say(ch, hardik, wrong) is True and g.item["lives"] == 6 and wrong.upper() in g.msg.content
+    assert await say(ch, hardik, wrong) is True and g.item["lives"] == 6, "repeat letters are free"
+    for c in dict.fromkeys(word[:-1] if len(set(word)) > 1 else word):
+        await say(ch, ann, c)
+    assert not g.event.is_set() or g.winner
+    await say(ch, hardik, word)
+    await wait_for(lambda: g.round_no == 2 and g.item["word"] != word or 140 not in games.GAMES)
+    assert g.scores[11] >= 2 and g.scores.get(10, 0) >= 1
+    await wait_for(lambda: g.round_no == 2 and g.item is not None)
+    # lose a word: 7 wrong letters
+    w2 = g.item["word"]
+    for c in [c for c in "zqxjkvwyfb" if c not in w2][:7]:
+        await say(ch, ann, c)
+    await wait_for(lambda: any("Out of lives" in t for t in ch.texts()))
+    await wait_for(lambda: 140 not in games.GAMES)
+
+    ch = Chan(141)
+    await games.start(guild, ch, ann, [hardik], "would you rather", rounds=2, bot_id=me.id)
+    g = games.GAMES[141]
+    await wait_for(lambda: len(ch.sent) >= 2 and g.msg.view is not None)
+    q = g.msg
+    assert len(q.view.children) == 2 and "Would you rather" in q.content
+    t, log = click(bob, q.view.children[0]); await t
+    assert ("msg", "This game isn't open to you.") in log
+    t, _ = click(ann, q.view.children[0]); await t
+    t, _ = click(ann, q.view.children[1]); await t                   # changed her mind
+    assert g.votes == {10: 1}
+    t, log = click(hardik, q.view.children[0]); await t              # both voted: round ends at once
+    await wait_for(lambda: "🅰️ **1**: Hardik" in q.content and "🅱️ **1**: Ann" in q.content)
+    assert q.view is None
+    await wait_for(lambda: g.round_no == 2 and g.msg is not q)
+    assert await say(ch, ann, "skip") is True
+    await wait_for(lambda: 141 not in games.GAMES)
+    assert "dilemmas" in ch.texts()[-1] and "pt" not in ch.texts()[-1]
+    assert not [r for r in await db.top_scores(1) if r["user_id"] == 12]
+
+
 async def check_tools_and_board():
     ch = Chan(120)
     ctx = N(user_id=10, channel_id=120, server_id=1, bot=N(user=me),
@@ -307,12 +425,15 @@ async def _all():
         await check_trivia()
         await check_twenty()
         await check_tictactoe()
+        await check_connect4_rps()
+        await check_hangman_wyr()
         await check_tools_and_board()
     finally:
         for g in list(games.GAMES.values()):
             await games.finish(g, None, announce=False)
         await db.close()
     check_logic()
+    check_new_logic()
     check_data()
 
 
