@@ -25,14 +25,20 @@ from tools import discord_utils as du
 log = logging.getLogger("games")
 
 KINDS = {"riddle": "Riddles", "trivia": "Trivia", "scramble": "Word scramble",
-         "twenty_questions": "20 Questions", "tictactoe": "Tic-Tac-Toe"}
+         "twenty_questions": "20 Questions", "tictactoe": "Tic-Tac-Toe", "connect4": "Connect Four",
+         "rps": "Rock-Paper-Scissors", "hangman": "Hangman", "wyr": "Would You Rather"}
 ALIASES = {"riddles": "riddle", "puzzle": "riddle", "quiz": "trivia", "scrambled": "scramble",
            "word": "scramble", "words": "scramble", "20q": "twenty_questions", "20 questions": "twenty_questions",
            "twenty questions": "twenty_questions", "twenty_question": "twenty_questions",
-           "tic tac toe": "tictactoe", "tic-tac-toe": "tictactoe", "ttt": "tictactoe", "noughts and crosses": "tictactoe"}
+           "tic tac toe": "tictactoe", "tic-tac-toe": "tictactoe", "ttt": "tictactoe", "noughts and crosses": "tictactoe",
+           "connect four": "connect4", "connect 4": "connect4", "connect-4": "connect4", "c4": "connect4",
+           "rock paper scissors": "rps", "rock-paper-scissors": "rps", "rockpaperscissors": "rps",
+           "hang man": "hangman", "would you rather": "wyr", "wouldyourather": "wyr", "dilemma": "wyr"}
 LETTERS = "ABCD"
 ROUND_SECONDS = {"riddle": lambda: config.GAME_RIDDLE_SECONDS, "trivia": lambda: config.GAME_TRIVIA_SECONDS,
-                 "scramble": lambda: config.GAME_SCRAMBLE_SECONDS}
+                 "scramble": lambda: config.GAME_SCRAMBLE_SECONDS, "hangman": lambda: config.GAME_HANGMAN_SECONDS,
+                 "wyr": lambda: config.GAME_WYR_SECONDS}
+BUTTON_GAMES = ("tictactoe", "connect4", "rps")      # played with a board of buttons, 1 match per game
 
 STOP = {"stop", "quit", "end", "stop game", "end game", "stop the game", "end the game", "quit game",
         "stop playing", "cancel game", "cancel the game"}
@@ -152,6 +158,9 @@ class Game:
     turn: int = 0
     view: Any = None
     winners: set = dataclasses.field(default_factory=set)
+    votes: dict = dataclasses.field(default_factory=dict)       # would-you-rather
+    picks: dict = dataclasses.field(default_factory=dict)       # rock-paper-scissors
+    log: list = dataclasses.field(default_factory=list)         # rps round results
 
     def accepts(self, uid: int) -> bool:
         return self.open or uid in self.players
@@ -214,13 +223,14 @@ async def start(guild, channel, starter, others, kind: str, rounds: int | None =
         difficulty = "any"
     humans = [m for m in others if not m.bot and m.id != starter.id]
     players = {starter.id} | {m.id for m in humans[:7]}
-    n = max(1, min(int(rounds or config.GAME_DEFAULT_ROUNDS), config.GAME_MAX_ROUNDS))
+    default = 3 if kind in ("rps", "wyr") else config.GAME_DEFAULT_ROUNDS
+    n = max(1, min(int(rounds or default), config.GAME_MAX_ROUNDS))
     g = Game(kind=kind, guild=guild, channel=channel, starter_id=starter.id, players=players,
              open=bool(open_all), rounds=n, bot_id=bot_id, difficulty=difficulty, category=category)
     g.names[starter.id] = starter.display_name
     for m in humans:
         g.names[m.id] = m.display_name
-    if kind in ("twenty_questions", "tictactoe"):
+    if kind in ("twenty_questions", "tictactoe", "connect4"):
         g.rounds = 1
     GAMES[channel.id] = g
     g.watch = _spawn(_watch(g))
@@ -235,8 +245,12 @@ async def start(guild, channel, starter, others, kind: str, rounds: int | None =
             await _send(g, f"🕵️ **20 Questions!** {who}\nI'm thinking of a **{cat}**. Ask yes/no questions "
                            f"(like `Does it fly?`) and I'll answer. Guess with `Is it ...?`. "
                            f"`hint` for a clue, `give up` to see it, `stop` to end.", allowed_mentions=ping)
-        else:
+        elif kind == "tictactoe":
             await _start_ttt(g, humans, who, ping)
+        elif kind == "connect4":
+            await _start_c4(g, humans, ping)
+        else:
+            await _start_rps(g, humans, ping)
     except Exception as e:
         log.exception("could not start game")
         await finish(g, None, announce=False)
@@ -256,9 +270,9 @@ async def finish(g: Game, reason: str | None, announce: bool = True) -> None:
         if t is not None and t is not cur:
             t.cancel()
     g.event.set()
-    if g.msg is not None and g.kind in ("trivia", "tictactoe"):
+    if g.msg is not None and g.kind in ("trivia", "wyr") + BUTTON_GAMES:
         try:
-            if g.kind == "tictactoe" and g.view is not None:
+            if g.kind in BUTTON_GAMES and g.view is not None:
                 g.view.refresh(over=True)
                 await g.msg.edit(view=g.view)
             else:
@@ -266,8 +280,8 @@ async def finish(g: Game, reason: str | None, announce: bool = True) -> None:
         except Exception:
             pass
     humans = {u for u in (g.participants | set(g.scores)) if u != g.bot_id}
-    if humans:
-        if g.kind in ("riddle", "trivia", "scramble") and len(humans) > 1:
+    if humans and g.kind != "wyr":
+        if g.kind in ("riddle", "trivia", "scramble", "hangman") and len(humans) > 1:
             top = max(g.scores.get(u, 0) for u in humans)
             g.winners = {u for u in humans if g.scores.get(u, 0) == top and top > 0}
         try:
@@ -275,9 +289,9 @@ async def finish(g: Game, reason: str | None, announce: bool = True) -> None:
         except Exception:
             log.exception("could not save game scores")
     if announce:
-        head = reason or "🏁 **Game over!**"
+        head = reason or ("🏁 That's all the dilemmas!" if g.kind == "wyr" else "🏁 **Game over!**")
         try:
-            await _send(g, f"{head}\n{standings(g)}" if g.kind != "twenty_questions" or g.scores else head)
+            await _send(g, f"{head}\n{standings(g)}" if g.kind not in ("twenty_questions", "wyr") or g.scores else head)
         except Exception:
             log.debug("final message failed", exc_info=True)
 
@@ -287,8 +301,8 @@ async def _watch(g: Game) -> None:
         while not g.finished:
             await asyncio.sleep(60)
             if not g.finished and time.time() - g.last > config.GAME_IDLE_MINUTES * 60:
-                if g.kind == "tictactoe" and g.view is not None:
-                    await _ttt_end(g, "⌛ Game abandoned.", None)
+                if g.kind in BUTTON_GAMES and g.view is not None:
+                    await BUTTON_END[g.kind](g, "⌛ Game abandoned.", None)
                 else:
                     await finish(g, "⌛ Nobody has played for a while, so I ended the game.")
                 return
@@ -305,6 +319,9 @@ async def _run_rounds(g: Game, who: str, ping) -> None:
             "trivia": f"🧠 **Trivia time!** {who}\n{g.rounds} question(s). Tap the right answer: one try each per question.",
             "scramble": f"🔤 **Word scramble!** {who}\n{g.rounds} word(s). Unscramble them by typing the word. "
                         f"`hint` = a letter (-1 pt), `skip` = pass, `stop` = end.",
+            "hangman": f"🪢 **Hangman!** {who}\n{g.rounds} word(s). Type a single letter, or the whole word if you know it. "
+                       f"7 wrong guesses and it's over. Letters +1, solving it +2. `hint` costs a life, `skip` passes, `stop` ends.",
+            "wyr": f"🤔 **Would you rather...** {who}\n{g.rounds} dilemma(s). Tap your pick: you can change it until time is up.",
         }[g.kind]
         await _send(g, intro, allowed_mentions=ping)
         await asyncio.sleep(INTRO_PAUSE)
@@ -346,6 +363,16 @@ async def _ask(g: Game) -> None:
         g.item = {"answers": [w], "word": w}
         g.q_text = f"🔤 {head} `{scramble(w)}` ({len(w)} letters)"
         g.msg = await _send(g, g.q_text)
+    elif g.kind == "hangman":
+        words = [w for d, ws in data.SCRAMBLE_WORDS.items() if g.difficulty in ("any", d) for w in ws]
+        g.item = {"word": pick(g.guild.id, "hangman", words), "guessed": set(), "wrong": set(), "lives": 7}
+        g.msg = await _send(g, _hm_text(g))
+    elif g.kind == "wyr":
+        a, b = pick(g.guild.id, "wyr", data.WYR)
+        g.votes = {}
+        g.item = {"a": a, "b": b}
+        g.q_text = f"🤔 **{g.round_no}/{g.rounds}** Would you rather...\n🅰️ **{a}**\n🅱️ **{b}**"
+        g.msg = await _send(g, g.q_text, view=WYRView(g))
     else:
         pool = [t for t in data.TRIVIA if g.category in ("", "any", t[0])]
         cat, q, right, wrong = pick(g.guild.id, "trivia", pool)
@@ -357,7 +384,20 @@ async def _ask(g: Game) -> None:
 
 
 async def _end_round(g: Game) -> None:
-    answer = g.item["right"] if g.kind == "trivia" else (g.item["word"] if g.kind == "scramble" else g.item["answers"][0])
+    if g.kind == "wyr":
+        await _end_wyr(g)
+        return
+    answer = (g.item["right"] if g.kind == "trivia" else g.item["word"] if g.kind in ("scramble", "hangman")
+              else g.item["answers"][0])
+    if g.kind == "hangman" and g.winner is not None:
+        add_points(g, g.winner, 2)
+        g.idle_rounds = 0
+        await _send(g, f"{random.choice(CORRECT).format(n=g.name(g.winner))} The word: **{answer}** (+2 bonus)")
+        return
+    if g.kind == "hangman" and g.item.get("lost"):
+        g.idle_rounds = 0
+        await _send(g, f"💀 Out of lives! The word was **{answer}**.")
+        return
     if g.winner is not None:
         base = {"riddle": 3, "scramble": 2, "trivia": 2}[g.kind]
         pts = base if g.kind == "trivia" else max(1, base - g.hints)
@@ -449,7 +489,7 @@ async def handle_message(message, bot_id: int) -> bool:
         return True
     if addressed and cmd is None:
         return False                              # talking to Neuro about something else: normal path
-    if g.kind == "tictactoe":
+    if g.kind in BUTTON_GAMES:
         return False
     g.names[uid] = message.author.display_name
     g.last = time.time()
@@ -466,11 +506,13 @@ async def handle_message(message, bot_id: int) -> bool:
         g.participants.add(uid)
         g.event.set()
         return True
-    if cmd == "hint":
+    if cmd == "hint" and g.kind in ("riddle", "scramble", "hangman", "trivia"):
         await _hint(g)
         return True
-    if g.kind == "trivia":
-        return False                              # trivia is answered with the buttons
+    if g.kind in ("trivia", "wyr"):
+        return False                              # answered with the buttons; chat flows on normally
+    if g.kind == "hangman":
+        return await _hm_guess(g, uid, text)
     g.participants.add(uid)
     if is_correct(text, g.item["answers"]):
         g.winner = uid
@@ -481,6 +523,16 @@ async def handle_message(message, bot_id: int) -> bool:
 async def _hint(g: Game) -> None:
     if g.kind == "trivia":
         await _send(g, "No hints in trivia. Tap an answer!")
+        return
+    if g.kind == "hangman":
+        it = g.item
+        hidden = [c for c in dict.fromkeys(it["word"]) if c not in it["guessed"]]
+        if len(hidden) <= 1 or it["lives"] <= 1:
+            await _send(g, "No hint available right now!")
+            return
+        it["guessed"].add(random.choice(hidden))
+        it["lives"] -= 1
+        await _hm_refresh(g)
         return
     if g.kind == "riddle":
         cap = 2
@@ -635,7 +687,7 @@ class TTTView(discord.ui.View):
             other = next(u for u in g.sym if u != uid) if g.bot_id not in g.sym else uid
             g.turn = other
             self.refresh()
-            await interaction.response.edit_message(content=_ttt_text(g), view=self)
+            await interaction.response.edit_message(content=_board_text(g), view=self)
         return cb
 
 
@@ -661,12 +713,17 @@ async def _start_ttt(g: Game, humans: list, who: str, ping) -> None:
 
 
 async def _ttt_end(g: Game, note: str | None, interaction, res: str | None = None) -> None:
+    await _board_end(g, note, interaction, res)
+
+
+async def _board_end(g: Game, note: str | None, interaction, res: str | None = None) -> None:
+    """End of a two-player board game (tic-tac-toe, connect four): points, final board, leaderboard."""
     humans = [u for u in g.sym if u != g.bot_id]
     if res == "draw":
         tail = "🤝 **Draw!**"
         for u in humans:
             add_points(g, u, 1)
-    elif res in ("X", "O"):
+    elif res is not None:
         w = next(u for u, s in g.sym.items() if s == res)
         tail = f"🏆 **{'Neuro' if w == g.bot_id else g.name(w)}** wins!" + (" (+3)" if w != g.bot_id else "")
         if w != g.bot_id:
@@ -681,13 +738,345 @@ async def _ttt_end(g: Game, note: str | None, interaction, res: str | None = Non
     g.view.refresh(over=True)
     try:
         if interaction is not None:
-            await interaction.response.edit_message(content=_ttt_text(g, tail), view=g.view)
+            await interaction.response.edit_message(content=_board_text(g, tail), view=g.view)
         elif g.msg is not None:
-            await g.msg.edit(content=_ttt_text(g, tail), view=g.view)
+            await g.msg.edit(content=_board_text(g, tail), view=g.view)
     except discord.HTTPException:
         pass
     await finish(g, None, announce=False)
 
 
+# ---------------------------------------------------------------- connect four
+C4_ROWS, C4_COLS = 6, 7
+C4_EMOJI = {"": "⚪", "R": "🔴", "Y": "🟡"}
+
+
+def c4_drop(b: list, col: int, sym: str) -> int | None:
+    """Drop a piece into a column of the 6x7 board (row-major, row 0 on top). Returns the row, or None if full."""
+    for r in range(C4_ROWS - 1, -1, -1):
+        if not b[r * C4_COLS + col]:
+            b[r * C4_COLS + col] = sym
+            return r
+    return None
+
+
+def c4_result(b: list) -> str | None:
+    for r in range(C4_ROWS):
+        for c in range(C4_COLS):
+            sym = b[r * C4_COLS + c]
+            if not sym:
+                continue
+            for dr, dc in ((0, 1), (1, 0), (1, 1), (1, -1)):
+                if all(0 <= r + dr * k < C4_ROWS and 0 <= c + dc * k < C4_COLS
+                       and b[(r + dr * k) * C4_COLS + c + dc * k] == sym for k in range(4)):
+                    return sym
+    return "draw" if all(b) else None
+
+
+def c4_ai(b: list, me: str, opp: str) -> int:
+    cols = [c for c in range(C4_COLS) if not b[c]]
+
+    def after(col, sym):
+        t = b[:]
+        c4_drop(t, col, sym)
+        return t
+    for sym in (me, opp):                                   # win first, then block
+        for c in cols:
+            if c4_result(after(c, sym)) == sym:
+                return c
+    safe = []
+    for c in cols:                                          # don't hand the opponent a win on top of my move
+        t = after(c, me)
+        if t[c]:
+            t2 = t[:]
+            if c4_drop(t2, c, opp) is not None and c4_result(t2) == opp:
+                continue
+        safe.append(c)
+    return min(safe or cols, key=lambda c: abs(c - 3) + random.random())
+
+
+def _c4_text(g: Game, tail: str = "") -> str:
+    r = next(u for u, s in g.sym.items() if s == "R")
+    y = next(u for u, s in g.sym.items() if s == "Y")
+    nm = lambda u: "Neuro" if u == g.bot_id else g.name(u)
+    grid = "\n".join("".join(C4_EMOJI[g.board[r_ * C4_COLS + c]] for c in range(C4_COLS)) for r_ in range(C4_ROWS))
+    turn = f"**{nm(g.turn)}**'s turn"
+    return f"🔴 **{nm(r)}** vs 🟡 **{nm(y)}**\n{tail or turn}\n1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣\n{grid}"
+
+
+def _board_text(g: Game, tail: str = "") -> str:
+    return _c4_text(g, tail) if g.kind == "connect4" else _ttt_text(g, tail)
+
+
+class C4View(discord.ui.View):
+    def __init__(self, g: Game):
+        super().__init__(timeout=config.GAME_IDLE_MINUTES * 60)
+        self.g, self.cols = g, []
+        for c in range(C4_COLS):
+            b = discord.ui.Button(label=str(c + 1), style=discord.ButtonStyle.secondary, row=c // 4)
+            b.callback = self._cb(c)
+            self.cols.append(b)
+            self.add_item(b)
+
+    def refresh(self, over: bool = False) -> None:
+        for c, b in enumerate(self.cols):
+            b.disabled = over or bool(self.g.board[c])
+
+    def _cb(self, col: int):
+        async def cb(interaction):
+            g, uid = self.g, interaction.user.id
+            if g.finished:
+                await interaction.response.defer()
+                return
+            if uid not in g.sym:
+                await interaction.response.send_message("You're not in this game.", ephemeral=True)
+                return
+            if g.turn != uid:
+                await interaction.response.send_message("Wait for your turn!", ephemeral=True)
+                return
+            g.last = time.time()
+            if c4_drop(g.board, col, g.sym[uid]) is None:
+                await interaction.response.send_message("That column is full.", ephemeral=True)
+                return
+            g.participants.add(uid)
+            res = c4_result(g.board)
+            if res is None and g.bot_id in g.sym:
+                c4_drop(g.board, c4_ai(g.board, g.sym[g.bot_id], g.sym[uid]), g.sym[g.bot_id])
+                res = c4_result(g.board)
+            if res is not None:
+                await _board_end(g, None, interaction, res)
+                return
+            if g.bot_id not in g.sym:
+                g.turn = next(u for u in g.sym if u != uid)
+            self.refresh()
+            await interaction.response.edit_message(content=_c4_text(g), view=self)
+        return cb
+
+
+async def _start_c4(g: Game, humans: list, ping) -> None:
+    opp = humans[0].id if humans else g.bot_id
+    g.sym = {g.starter_id: "R", opp: "Y"}
+    g.turn = g.starter_id
+    g.players = {g.starter_id, opp}
+    g.open = False
+    g.board = [""] * (C4_ROWS * C4_COLS)
+    g.view = C4View(g)
+    g.view.refresh()
+    g.msg = await g.channel.send(_c4_text(g) + "\nGet four in a row! Tap a column number.",
+                                 view=g.view, allowed_mentions=mention_ids(g.players))
+
+
+# ---------------------------------------------------------------- rock paper scissors
+RPS_EMOJI = {"rock": "🪨", "paper": "📄", "scissors": "✂️"}
+RPS_BEATS = {"rock": "scissors", "paper": "rock", "scissors": "paper"}
+
+
+class RPSView(discord.ui.View):
+    def __init__(self, g: Game):
+        super().__init__(timeout=config.GAME_IDLE_MINUTES * 60)
+        self.g, self.buttons = g, []
+        for name, emoji in RPS_EMOJI.items():
+            b = discord.ui.Button(label=f"{emoji} {name.title()}", style=discord.ButtonStyle.secondary)
+            b.callback = self._cb(name)
+            self.buttons.append(b)
+            self.add_item(b)
+
+    def refresh(self, over: bool = False) -> None:
+        for b in self.buttons:
+            b.disabled = over
+
+    def _cb(self, choice: str):
+        async def cb(interaction):
+            g, uid = self.g, interaction.user.id
+            if g.finished:
+                await interaction.response.defer()
+                return
+            if uid not in g.sym:
+                await interaction.response.send_message("You're not in this game.", ephemeral=True)
+                return
+            if uid in g.picks:
+                await interaction.response.send_message("You already picked this round.", ephemeral=True)
+                return
+            g.last = time.time()
+            g.picks[uid] = choice
+            g.participants.add(uid)
+            if g.bot_id in g.sym:
+                g.picks[g.bot_id] = random.choice(list(RPS_EMOJI))
+            if len(g.picks) < 2:                             # picks stay secret until both are in
+                other = next(u for u in g.sym if u != uid)
+                await interaction.response.send_message(
+                    f"🔒 Locked in {RPS_EMOJI[choice]}. Waiting for {g.name(other)}...", ephemeral=True)
+                return
+            a, b = list(g.sym)
+            pa, pb = g.picks[a], g.picks[b]
+            nm = lambda u: "Neuro" if u == g.bot_id else g.name(u)
+            if pa == pb:
+                outcome = "draw"
+            else:
+                w = a if RPS_BEATS[pa] == pb else b
+                add_points(g, w, 1)
+                outcome = f"**{nm(w)}** wins the round"
+            g.log.append(f"{g.round_no}. {nm(a)} {RPS_EMOJI[pa]} vs {RPS_EMOJI[pb]} {nm(b)}: {outcome}")
+            g.picks = {}
+            if g.round_no >= g.rounds:
+                await _rps_end(g, None, interaction)
+                return
+            g.round_no += 1
+            await interaction.response.edit_message(content=_rps_text(g), view=self)
+        return cb
+
+
+def _rps_text(g: Game, tail: str = "") -> str:
+    a, b = list(g.sym)
+    nm = lambda u: "Neuro" if u == g.bot_id else g.name(u)
+    head = f"✊ **{nm(a)}** vs **{nm(b)}**: best of {g.rounds}"
+    score = f"Score {g.scores.get(a, 0)} - {g.scores.get(b, 0)}"
+    todo = tail or f"**Round {g.round_no}/{g.rounds}**: pick in secret, I reveal when both have chosen!"
+    return "\n".join([head, *g.log, score, todo])[:1990]
+
+
+async def _start_rps(g: Game, humans: list, ping) -> None:
+    opp = humans[0].id if humans else g.bot_id
+    g.sym = {g.starter_id: "A", opp: "B"}
+    g.players = {g.starter_id, opp}
+    g.open = False
+    g.round_no = 1
+    g.view = RPSView(g)
+    g.msg = await g.channel.send(_rps_text(g), view=g.view, allowed_mentions=mention_ids(g.players))
+
+
+async def _rps_end(g: Game, note: str | None, interaction, res=None) -> None:
+    a, b = list(g.sym)
+    nm = lambda u: "Neuro" if u == g.bot_id else g.name(u)
+    sa, sb = g.scores.get(a, 0), g.scores.get(b, 0)
+    if note:
+        tail = note
+    elif sa == sb:
+        tail = "🤝 **The match is a draw!**"
+    else:
+        w = a if sa > sb else b
+        tail = f"🏆 **{nm(w)}** wins the match {max(sa, sb)}-{min(sa, sb)}!" + (" (+2)" if w != g.bot_id else "")
+        if w != g.bot_id:
+            add_points(g, w, 2)
+            g.winners = {w}
+    for u in (a, b):
+        if u != g.bot_id:
+            g.participants.add(u)
+    g.view.refresh(over=True)
+    try:
+        if interaction is not None:
+            await interaction.response.edit_message(content=_rps_text(g, tail), view=g.view)
+        elif g.msg is not None:
+            await g.msg.edit(content=_rps_text(g, tail), view=g.view)
+    except discord.HTTPException:
+        pass
+    await finish(g, None, announce=False)
+
+
+BUTTON_END = {"tictactoe": _ttt_end, "connect4": _board_end, "rps": _rps_end}
+
+
+# ---------------------------------------------------------------- hangman
+def _hm_text(g: Game) -> str:
+    it = g.item
+    masked = " ".join(c.upper() if c in it["guessed"] else "_" for c in it["word"])
+    hearts = "❤️" * it["lives"] + "🖤" * (7 - it["lives"])
+    wrong = " ".join(sorted(x.upper() for x in it["wrong"])) or "-"
+    return f"🪢 **{g.round_no}/{g.rounds}** `{masked}` ({len(it['word'])} letters)\n{hearts}  Wrong: {wrong}"
+
+
+async def _hm_refresh(g: Game) -> None:
+    try:
+        await g.msg.edit(content=_hm_text(g))
+    except discord.HTTPException:
+        pass
+
+
+async def _hm_guess(g: Game, uid: int, text: str) -> bool:
+    """A single letter or the whole word. Anything else is ordinary chat and is left alone."""
+    t = (text or "").strip().lower()
+    it = g.item
+    if not t.isalpha() or g.event.is_set():
+        return False
+    word = it["word"]
+    if len(t) == 1:
+        if t in it["guessed"] or t in it["wrong"]:
+            return True
+        g.participants.add(uid)
+        if t in word:
+            it["guessed"].add(t)
+            add_points(g, uid, 1)
+            if set(word) <= it["guessed"]:
+                g.winner = uid
+                g.event.set()
+                await _hm_refresh(g)
+                return True
+        else:
+            it["wrong"].add(t)
+            it["lives"] -= 1
+    elif len(t) == len(word):
+        g.participants.add(uid)
+        if t == word:
+            it["guessed"] |= set(word)
+            g.winner = uid
+            g.event.set()
+            await _hm_refresh(g)
+            return True
+        it["lives"] -= 1
+    else:
+        return False
+    if it["lives"] <= 0:
+        it["lost"] = True
+        g.skipped = True
+        g.event.set()
+    await _hm_refresh(g)
+    return True
+
+
+# ---------------------------------------------------------------- would you rather
+class WYRView(discord.ui.View):
+    def __init__(self, g: Game):
+        super().__init__(timeout=config.GAME_WYR_SECONDS + 10)
+        self.g, self.round_no = g, g.round_no
+        for i, (label, emoji) in enumerate((("Option A", "🅰️"), ("Option B", "🅱️"))):
+            b = discord.ui.Button(label=label, emoji=emoji, style=discord.ButtonStyle.primary if i == 0 else discord.ButtonStyle.success)
+            b.callback = self._cb(i)
+            self.add_item(b)
+
+    def _cb(self, i: int):
+        async def cb(interaction):
+            g, uid = self.g, interaction.user.id
+            if g.finished or g.round_no != self.round_no or g.event.is_set():
+                await interaction.response.defer()
+                return
+            if not g.accepts(uid):
+                await interaction.response.send_message("This game isn't open to you.", ephemeral=True)
+                return
+            g.names[uid] = interaction.user.display_name
+            g.participants.add(uid)
+            g.last = time.time()
+            g.votes[uid] = i
+            await interaction.response.send_message(f"Saved: {'🅰️' if i == 0 else '🅱️'} (you can change it)", ephemeral=True)
+            if not g.open and g.players <= set(g.votes):
+                g.event.set()
+        return cb
+
+
+async def _end_wyr(g: Game) -> None:
+    a = [u for u, v in g.votes.items() if v == 0]
+    b = [u for u, v in g.votes.items() if v == 1]
+    names = lambda us: ", ".join(g.name(u) for u in us) or "nobody"
+    if g.votes:
+        g.idle_rounds = 0
+    else:
+        g.idle_rounds += 1
+    text = (f"{g.q_text}\n\n🅰️ **{len(a)}**: {names(a)}\n🅱️ **{len(b)}**: {names(b)}")[:1990]
+    try:
+        await g.msg.edit(content=text, view=None)
+    except discord.HTTPException:
+        await _send(g, text)
+
+
 def describe() -> str:
-    return "riddle, trivia (categories: " + ", ".join(data.TRIVIA_CATEGORIES) + "), scramble, twenty_questions, tictactoe"
+    return ("riddle, trivia (categories: " + ", ".join(data.TRIVIA_CATEGORIES) + "), scramble, twenty_questions, "
+            "tictactoe, connect4, rps (rock-paper-scissors), hangman, wyr (would you rather)")

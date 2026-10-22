@@ -145,4 +145,6 @@ GAME_IDLE_MINUTES = int(os.getenv("GAME_IDLE_MINUTES", "10"))        # a game no
 GAME_RIDDLE_SECONDS = int(os.getenv("GAME_RIDDLE_SECONDS", "60"))
 GAME_TRIVIA_SECONDS = int(os.getenv("GAME_TRIVIA_SECONDS", "25"))
 GAME_SCRAMBLE_SECONDS = int(os.getenv("GAME_SCRAMBLE_SECONDS", "40"))
+GAME_HANGMAN_SECONDS = int(os.getenv("GAME_HANGMAN_SECONDS", "120"))
+GAME_WYR_SECONDS = int(os.getenv("GAME_WYR_SECONDS", "30"))
 GAME_TOOL_PERMISSION = os.getenv("GAME_TOOL_PERMISSION", "everyone").strip().lower()   # mod | everyone | owner

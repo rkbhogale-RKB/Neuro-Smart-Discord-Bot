@@ -13,10 +13,10 @@ from tools.registry import registry
                  "Use when the user says they want to play something ('me and hardik want to play riddles'). "
                  "Pick the game yourself if they only say 'a game'. No other tool is needed afterwards."),
     parameters={"type": "object", "properties": {
-        "game": {"type": "string", "description": "riddle | trivia | scramble | twenty_questions | tictactoe"},
+        "game": {"type": "string", "description": "riddle | trivia | scramble | twenty_questions | tictactoe | connect4 | rps | hangman | wyr"},
         "players": {"type": "array", "items": {"type": "string"},
                     "description": "other people playing (names, mentions or 'me'); the asker is always included"},
-        "rounds": {"type": "integer", "description": "1-10, default 5"},
+        "rounds": {"type": "integer", "description": "1-10, default 5 (rps and wyr: 3). Ignored by tictactoe, connect4 and 20 questions"},
         "category": {"type": "string", "description": "trivia only: general, science, geography, history, entertainment, tech"},
         "difficulty": {"type": "string", "enum": ["easy", "medium", "hard", "any"], "description": "riddle / scramble"},
         "open_to_all": {"type": "boolean", "description": "anyone in the channel may join in"}},

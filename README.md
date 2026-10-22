@@ -124,11 +124,15 @@ in), posts the rules and starts. Games run in the current channel, one per chann
 | **Word scramble** | unscramble the word; `hint` reveals letters |
 | **20 Questions** | Neuro thinks of something; ask yes/no questions, guess with `Is it ...?`; `hint`, `give up` |
 | **Tic-Tac-Toe** | button board; two players, or against Neuro (no players named) |
+| **Connect Four** | tap a column number; get four in a row; two players or against Neuro |
+| **Rock-Paper-Scissors** | best of 3 (or `rounds`); picks are secret until both players chose; two players or against Neuro |
+| **Hangman** | type a letter or the whole word; 7 lives; letters +1, solving +2; `hint` costs a life |
+| **Would You Rather** | tap A or B (you can change it); results show who picked what; no points |
 
 Say `stop` (or "neuro stop game") to end; `score` shows the standings. 3 points for riddles, 2 for trivia/scramble,
 first correct answer wins the round. `/neuro leaderboard` or "show the leaderboard" shows the server board.
 
-**Token and call savings:** 60 riddles, 64 trivia questions and 94 scramble words are built in, so rounds need no model call.
+**Token and call savings:** 60 riddles, 64 trivia questions, 94 words (scramble and hangman) and 40 dilemmas are built in, so rounds need no model call.
 Players' messages are checked in code and never reach the model; wrong guesses get no reaction; the start/stop/leaderboard
 tools answer directly (no second model call). The only model use is 20 Questions: one tiny call per question (the answer is
 forced to Yes/No/Sometimes/Irrelevant, and guesses are checked in code). Games end on their own after
