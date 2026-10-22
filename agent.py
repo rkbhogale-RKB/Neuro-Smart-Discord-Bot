@@ -28,7 +28,7 @@ ACTION_RE = re.compile(
     r"message|tell|ask|run|send|use|execute|command|list|show|who|whos|members?|channels?|roles?|"
     r"voice|online|server|info|find|check|analy[sz]e|explain|bots?|apps?|warn\w*|strikes?|remind\w*|"
     r"cancel|schedule|build|builds?|create|make|setup|rename|edit|change|undo|revise|move|hide|"
-    r"play\w*|games?|riddles?|trivia|quiz|scramble|tic|20|leaderboard|scores?|summar\w*|recap|happen\w*|catch\s*(?:me\s*)?up|missed|set up|section|announce\w*|post|categor\w*|confirm|group)\b)", re.I)
+    r"search\w*|google|look\s*up|images?|pics?|pictures?|photos?|gifs?|memes?|react\w*|news|latest|play\w*|games?|riddles?|trivia|quiz|scramble|tic|20|leaderboard|scores?|summar\w*|recap|happen\w*|catch\s*(?:me\s*)?up|missed|set up|section|announce\w*|post|categor\w*|confirm|group)\b)", re.I)
 
 # Past-tense claims in a reply -> the tool(s) that must have succeeded for the claim to be true.
 CLAIMS = [
@@ -54,6 +54,8 @@ CLAIMS = [
     (re.compile(r"\b(?:i(?:'ve| have)? )?(?:started|kicked off|set up) (?:a |the |your )?(?:game|riddles?|trivia|quiz)\b", re.I),
      {"start_game"}),
     (re.compile(r"\b(?:i(?:'ve| have)? )?(?:stopped|ended) (?:the )?game\b", re.I), {"stop_game"}),
+    (re.compile(r"\b(?:i(?:'ve| have)? )?(?:sent|posted|dropped|found) (?:you |him |her |them )?(?:a |an |the |some )?(?:gif|image|picture|pic|photo)s?\b", re.I),
+     {"send_gif", "send_image"}),
     (re.compile(r"\b(purged|deleted (?:the |\d+ )?(?:last )?\d*\s*messages?)\b", re.I), {"purge_messages"}),
 ]
 UNDONE = ("I didn't actually do that, yaar: no action ran on my side. Tell me exactly what to do, "

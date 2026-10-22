@@ -138,3 +138,15 @@ tools answer directly (no second model call). The only model use is 20 Questions
 forced to Yes/No/Sometimes/Irrelevant, and guesses are checked in code). Games end on their own after
 `GAME_IDLE_MINUTES` of silence or two unanswered rounds. Games live in memory (a restart ends them); scores are saved.
 Settings: see `.env.example` (`GAMES_ENABLED`, `GAME_*`).
+
+## Web search, pictures and GIFs (anyone, only when asked)
+- **Search:** *"neuro, search the latest on the new iPhone"*, *"google who won the match"*. Uses Gemini's built-in Google Search
+  grounding (no extra key, uses `SEARCH_MODEL`, default `gemini-2.5-flash`). The answer is short, posted straight to the chat with source links.
+  One search = one model call; limit 12 per person per day. Not used for chit-chat or things Neuro already knows.
+- **Pictures:** *"send a picture of a red panda"*, *"show me 3 photos of Mount Fuji"*. Sources in order: Pexels (if `PEXELS_API_KEY`
+  is set, free), DuckDuckGo images, Wikimedia Commons. Images are downloaded by the bot (public hosts only, size-capped, checked to be
+  real images) and uploaded with a credit line, so they show even if the source blocks hotlinking. Needs **Attach Files** + **Embed Links**.
+  Searches with blocked words (`WEB_BLOCKED_WORDS`) are refused. DuckDuckGo is an unofficial source and can stop working; Pexels is more reliable.
+- **GIFs:** *"send a gif for good morning"*, or reply to someone's message with *"@Neuro react to this with a gif"* and the GIF is sent as a
+  reply to that message. Needs a free **`GIPHY_API_KEY`** (developers.giphy.com; Tenor shut its API down in 2026). `GIF_RATING` defaults to `pg`.
+- Nothing here runs on its own: no automatic GIF reactions, so there are no extra calls. `/neuro status` shows whether the GIF key is set.

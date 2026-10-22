@@ -148,3 +148,17 @@ GAME_SCRAMBLE_SECONDS = int(os.getenv("GAME_SCRAMBLE_SECONDS", "40"))
 GAME_HANGMAN_SECONDS = int(os.getenv("GAME_HANGMAN_SECONDS", "120"))
 GAME_WYR_SECONDS = int(os.getenv("GAME_WYR_SECONDS", "30"))
 GAME_TOOL_PERMISSION = os.getenv("GAME_TOOL_PERMISSION", "everyone").strip().lower()   # mod | everyone | owner
+
+
+# ---- Web search, images and GIFs ----
+# Web search uses Gemini's built-in Google Search grounding (no extra key). Images: Pexels (optional key), then
+# DuckDuckGo, then Wikimedia Commons (no keys). GIFs need a free Giphy key (Tenor shut its API down in 2026).
+SEARCH_MODEL = os.getenv("SEARCH_MODEL", "gemini-2.5-flash")      # must be a Gemini model that supports grounding
+GIPHY_API_KEY = os.getenv("GIPHY_API_KEY", "").strip()
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
+GIF_RATING = os.getenv("GIF_RATING", "pg").strip().lower()         # g | pg | pg-13 | r
+IMAGE_MAX_BYTES = int(os.getenv("IMAGE_MAX_BYTES", str(7 * 1024 * 1024)))
+WEB_TOOL_PERMISSION = os.getenv("WEB_TOOL_PERMISSION", "everyone").strip().lower()   # mod | everyone | owner
+# Image and GIF searches containing these whole words are refused
+WEB_BLOCKED_WORDS = [w.strip().lower() for w in os.getenv(
+    "WEB_BLOCKED_WORDS", "porn,porno,nsfw,nude,nudes,naked,sex,sexy,hentai,gore,xxx,onlyfans").split(",") if w.strip()]
