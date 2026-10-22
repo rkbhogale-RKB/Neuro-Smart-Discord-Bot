@@ -21,7 +21,7 @@ import event_log
 import reminders
 from tools import app_tools, moderation_tools, server_tools, social_tools   # noqa: F401  (importing registers the tools)
 from tools import reminder_tools, warning_tools   # noqa: F401
-from tools import builder_tools, manage_tools, digest_tools, game_tools   # noqa: F401
+from tools import builder_tools, manage_tools, digest_tools, game_tools, web_tools   # noqa: F401
 import games
 from tools import discord_utils as du
 from tools.registry import ToolContext
